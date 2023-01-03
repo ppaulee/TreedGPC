@@ -1,0 +1,11 @@
+images/
+__pycache__/
+profiling/
+
+# exclude everything
+_tgpc/decision_tree/*
+_tgpc/kernel_matrix/*
+
+# exception to the rule
+!_tgpc/decision_tree/.gitkeep 
+!_tgpc/kernel_matrix/.gitkeep 
