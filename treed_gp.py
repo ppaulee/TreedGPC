@@ -366,32 +366,32 @@ class TreedGaussianProcessClassifier:
         print(f"leaf_id: {leaf_id}, len(X): {len(X)}")
         #print(f['kxx_0'][::])
 
-def __display_buckets():
-    pass
+    def __display_buckets():
+        pass
 
-def get_filenames(self) -> Tuple[str, str, str]:
-    """
-    get_filenames returns the filenames
+    def get_filenames(self) -> Tuple[str, str, str]:
+        """
+        get_filenames returns the filenames
 
-    :return (filename_kxx, filename_kzx, filename_tree)
-    """
-    return (self.filename_kxx, self.filename_kzx, self.filename_tree)
+        :return (filename_kxx, filename_kzx, filename_tree)
+        """
+        return (self.filename_kxx, self.filename_kzx, self.filename_tree)
 
-def get_path(self) -> str:
-    """
-    get_path returns the path to the kxx and kzx files
+    def get_path(self) -> str:
+        """
+        get_path returns the path to the kxx and kzx files
 
-    :return path
-    """
-    return self.dir_main + self.dir_kernel_matrix
+        :return path
+        """
+        return self.dir_main + self.dir_kernel_matrix
 
-def set_path(self, path : str) -> None:
-    """
-    set_path sets the path for the matrix files
+    def set_path(self, path : str) -> None:
+        """
+        set_path sets the path for the matrix files
 
-    :param path: new path
-    """
-    self.dir_kernel_matrix = path
+        :param path: new path
+        """
+        self.dir_kernel_matrix = path
 
 
 
