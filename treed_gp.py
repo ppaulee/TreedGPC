@@ -8,6 +8,9 @@ import uuid
 from patchify import patchify, unpatchify
 from typing import Tuple
 import pickle
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report
+from sklearn.metrics import precision_recall_fscore_support
+from utils import revert_one_hot_encoding
 
 
 class TreedGaussianProcessClassifier:
@@ -15,6 +18,8 @@ class TreedGaussianProcessClassifier:
     dir_kernel_matrix = "/kernel_matrix/"
     dir_deicison_tree = "/decision_tree/"
     dir_main = "./_tgpc/"
+
+    prediction_count = 0
 
     def __init__(self, kernel, num_classes : int, max_depth : int = 5, filename_kxx : str = None, 
         filename_kzx : str = None, filename_tree : str = None):
@@ -34,7 +39,7 @@ class TreedGaussianProcessClassifier:
             raise ValueError(f"max_depth can not be negative")
         if not isinstance(filename_kxx, str) and filename_kxx is not None:
             raise ValueError(f"filename_kxx must be a string")
-        if not isinstance(filename_kzx, str) and filename_kxx is not None:
+        if not isinstance(filename_kzx, str) and filename_kzx is not None:
             raise ValueError(f"filename_kzx must be a string")
         if not isinstance(filename_tree, str) and filename_tree is not None:
             raise ValueError(f"filename_tree must be a string")
@@ -192,6 +197,7 @@ class TreedGaussianProcessClassifier:
             for j in range(shape[1]):
                 patches_predict[i][j] = self.__predict_raw(np.array([patches[i][j]]))
 
+
         return unpatchify(patches_predict, X[0].shape)
 
     def __predict_raw(self, X : np.ndarray) -> np.ndarray:
@@ -217,7 +223,7 @@ class TreedGaussianProcessClassifier:
         dset_kxx = f[f'kxx_{leaf_id}']
         kxx = dset_kxx[0:dset_kxx.shape[0],0:dset_kxx.shape[1]]
         f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kzx, 'r')
-        dset_kzx = f['kzx_pred']
+        dset_kzx = f[f'kzx_pred_{self.prediction_count-1}']
         kzx = dset_kzx[0:dset_kzx.shape[0],0:dset_kzx.shape[1]]
         one_vs_rest = []
 
@@ -240,12 +246,25 @@ class TreedGaussianProcessClassifier:
                 #print(f"class {c}: {one_vs_rest[c][0][i]}")
             result[i] = np.argmax(self.__relu(classes))
 
-
-        print(f"result shape: {result.shape}")
         return result.reshape(X.shape[1], X.shape[2])
 
-    def eval_performance(self, train_x, train_y):
-        pass
+    def eval_performance(self, test_x, groundtruth):
+        print(test_x.shape)
+        prediction = np.zeros((len(test_x), test_x.shape[1], test_x.shape[2]))
+        for idx, val in enumerate(test_x):
+            v = val.reshape(1, test_x.shape[1], test_x.shape[2])
+            print(v.shape)
+            prediction[idx] = self.predict(v)
+        prediction = prediction.reshape(len(test_x) * test_x.shape[1] * test_x.shape[2])
+        groundtruth = revert_one_hot_encoding(groundtruth)
+        groundtruth = groundtruth.reshape(len(groundtruth) * groundtruth.shape[1] * groundtruth.shape[2])
+
+        target_names = []
+        for i in range(self.num_classes):
+            target_names += [f"Class {i}"]
+        
+        print(classification_report(groundtruth, prediction, target_names=target_names))
+
 
     def __relu(self, arr : np.ndarray) -> np.ndarray:
         """
@@ -331,7 +350,8 @@ class TreedGaussianProcessClassifier:
             dset = f.create_dataset(f"kxx_{leaf_id}", (len(X),len(Z)), dtype='float32')
         else:
             f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kzx,'r+')
-            dset = f.create_dataset(f"kzx_{leaf_id}", (len(X),len(Z)), dtype='float32')
+            dset = f.create_dataset(f"kzx_{leaf_id}_{self.prediction_count}", (len(X),len(Z)), dtype='float32')
+            self.prediction_count = self.prediction_count + 1
 
         shape_x = X.shape
         print(f"Calculate kernel matrix with dimensions {len(X),len(Z)} for leaf_id {leaf_id}")
@@ -359,7 +379,7 @@ class TreedGaussianProcessClassifier:
                     tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
                     tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
                     dset[start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z)
-                    dset[start_j:end_j, start_i:end_i] = dset[start_i:end_i, start_j:end_j]
+                    dset[start_j:end_j, start_i:end_i] = dset[start_i:end_i, start_j:end_j].T
 
         if invert is True:
             dset = scipy.linalg.pinv(dset)

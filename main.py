@@ -38,11 +38,12 @@ kernel = Sequential(
     # Dense Layer
     Conv2d(kernel_size=60, padding=0, var_weight=var_weight, var_bias=var_bias))
 
-#treed_gpc = TreedGaussianProcessClassifier(num_classes = 2, kernel=kernel, filename_kxx="kxx_mnist")
+#treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel)
 
-treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, filename_tree="model_9de1a9b1e21d4de692d4c8a8d8b49657.pkl")
+treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=4, filename_tree="model_10000.pkl",
+   filename_kxx="kxx_10000")
 
-num_training_samples = 10
+num_training_samples = 10000
 
 #"""
 train_x, train_y, test_x, test_y = create_semantic_segmentation_dataset(num_train_samples=num_training_samples,
@@ -83,5 +84,8 @@ matplotlib.image.imsave('groundtruth.png', test_x[0].reshape(test_x[0].shape[0],
 
 end = datetime.datetime.now()
 print(f"total time: {end-start}")
+
+treed_gpc.eval_performance(test_x[:1000], test_y[:1000])
+
 
 

@@ -3,13 +3,11 @@ import numpy as np
 def revert_one_hot_encoding(array):
     num, width, length, x = array.shape
     new_train_y = np.zeros((num,width,length))
+
     for num_images in range(len(array)):
         for i in range(len(array[num_images])):
             for j in range(len(array[num_images][i])):
-                for c in range(0,array[num_images].shape[2]):
-                    if array[num_images][i][j][c] != 0:
-                        new_train_y[num_images][i][j] = c+1
-                        break
+                new_train_y[num_images][i][j] = np.argmax(array[num_images][i][j])   
     return new_train_y
 
 mapping_class_to_rgb = [
