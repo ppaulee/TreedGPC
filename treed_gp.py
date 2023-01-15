@@ -8,9 +8,9 @@ import uuid
 from patchify import patchify, unpatchify
 from typing import Tuple
 import pickle
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report
-from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import classification_report
 from utils import revert_one_hot_encoding
+
 
 
 class TreedGaussianProcessClassifier:
@@ -22,7 +22,7 @@ class TreedGaussianProcessClassifier:
     prediction_count = 0
 
     def __init__(self, kernel, num_classes : int, max_depth : int = 5, filename_kxx : str = None, 
-        filename_kzx : str = None, filename_tree : str = None):
+        filename_kzx : str = None, filename_tree : str = None, cuda : bool = False):
         """
         __init__ initializes a new instance of a TreedGaussianProcessClassifier
 
@@ -31,6 +31,7 @@ class TreedGaussianProcessClassifier:
         :param max_depth: max depth of the decision tree. If max_depth == 0 then it behaves like a normal Gaussian process classifier
         :param filename_kxx: name of the file of the kxx kernel matrix. If provided the kxx kernel matrix will not be calculated
         :param filename_kzx: name of the file of the kzx kernel matrix. If provided the kzx kernel matrix will not be calculated
+        :param cuda: indicates whether to use the gpu for kernel calculations
         """
         # sanity checks
         if num_classes <= 0:
@@ -43,9 +44,16 @@ class TreedGaussianProcessClassifier:
             raise ValueError(f"filename_kzx must be a string")
         if not isinstance(filename_tree, str) and filename_tree is not None:
             raise ValueError(f"filename_tree must be a string")
+        if cuda:
+            assert torch.cuda.is_available() == True
+            
 
         self.max_depth = max_depth
+        
         self.kernel = kernel
+        if cuda:
+            self.kernel = kernel.cuda()
+        self.cuda = cuda
 
         self.num_classes = num_classes
         if (max_depth == 0):
@@ -177,7 +185,7 @@ class TreedGaussianProcessClassifier:
         if self.kxx_exists is False:
             for idx, bucket in enumerate(self.buckets):
                 train_x_bucket = self.train_x[bucket]
-                self.__compute_kernel_matrix(train_x_bucket, invert = True, batch_size = batch_size, leaf_id=idx)
+                self.__compute_kernel_matrix(train_x_bucket, batch_size = batch_size, leaf_id=idx)
 
     def predict(self, X : np.ndarray) -> np.ndarray:
         """
@@ -187,8 +195,8 @@ class TreedGaussianProcessClassifier:
 
         return: segmented image
         """
-        if self.train_x.shape[1:] != X.shape[1:]:
-            raise ValueError(f"Shape of X must be the same as for the training data")
+        #if self.train_x.shape[1:] != X.shape[1:]:
+        #    raise ValueError(f"Shape of X must be the same as for the training data")
 
         patches = patchify(X[0], self.patch_size, step=self.patch_size[0])
         shape = patches.shape
@@ -196,7 +204,6 @@ class TreedGaussianProcessClassifier:
         for i in range(shape[0]):
             for j in range(shape[1]):
                 patches_predict[i][j] = self.__predict_raw(np.array([patches[i][j]]))
-
 
         return unpatchify(patches_predict, X[0].shape)
 
@@ -229,9 +236,8 @@ class TreedGaussianProcessClassifier:
 
 
         for i in range(0, self.num_classes):
-            #for j in self.__divide_in_classes(tmp, i):
-                #print(j)
-            res = kzx @ kxx @ self.__divide_in_classes(tmp, i)
+            c = scipy.linalg.lstsq(kxx, self.__divide_in_classes(tmp, i), cond=1e-6)[0]
+            res = kzx @ c
             one_vs_rest.append(res)
         one_vs_rest = np.array(one_vs_rest)
 
@@ -240,20 +246,14 @@ class TreedGaussianProcessClassifier:
             classes = np.zeros(one_vs_rest.shape[0])
             for c in range(one_vs_rest.shape[0]):
                 classes[c] = one_vs_rest[c][0][i]
-                if c == 0:
-                    # constant
-                    classes[c] = classes[c] / 20
-                #print(f"class {c}: {one_vs_rest[c][0][i]}")
             result[i] = np.argmax(self.__relu(classes))
 
         return result.reshape(X.shape[1], X.shape[2])
 
     def eval_performance(self, test_x, groundtruth):
-        print(test_x.shape)
         prediction = np.zeros((len(test_x), test_x.shape[1], test_x.shape[2]))
         for idx, val in enumerate(test_x):
             v = val.reshape(1, test_x.shape[1], test_x.shape[2])
-            print(v.shape)
             prediction[idx] = self.predict(v)
         prediction = prediction.reshape(len(test_x) * test_x.shape[1] * test_x.shape[2])
         groundtruth = revert_one_hot_encoding(groundtruth)
@@ -325,7 +325,7 @@ class TreedGaussianProcessClassifier:
         return initial_model
 
     def __compute_kernel_matrix(self, X : np.ndarray, Z : np.ndarray =None, batch_size : int = 50, 
-        invert : bool = False, leaf_id : int = None) -> None:
+        leaf_id : int = None) -> None:
         """
         __compute_kernel_matrix computes the kernel matrix in batches. Because of the fact that
             k(x_1,x_2) = k(x_2,x_1) the kernel matrix is symmetric. Therefore, we can just compute 
@@ -360,10 +360,14 @@ class TreedGaussianProcessClassifier:
                 start_j = max(0, j-batch_size)
                 end_j = min(j + batch_size, len(Z))
 
-                tensor_x = torch.tensor(X[0].reshape(1, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
-                tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
-
-                dset[0, start_j:end_j] = self.kernel(tensor_x, tensor_z)
+                if self.cuda:
+                    tensor_x = torch.tensor(X[0].reshape(1, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
+                    tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
+                    dset[0, start_j:end_j] = self.kernel(tensor_x, tensor_z).cpu()
+                else:
+                    tensor_x = torch.tensor(X[0].reshape(1, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
+                    tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
+                    dset[0, start_j:end_j] = self.kernel(tensor_x, tensor_z)
         else:
             for i in range(0, len(X)+1, batch_size):
                 # use i as a start => calculate only upper triangular matrix
@@ -376,15 +380,18 @@ class TreedGaussianProcessClassifier:
                     end_j = min(j + batch_size, len(Z))
                     #print(f"start_i: {start_i} - end_i {end_i}")
                     #print(f"start_j: {start_j} - end_j {end_j}")
-                    tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
-                    tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
-                    dset[start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z)
-                    dset[start_j:end_j, start_i:end_i] = dset[start_i:end_i, start_j:end_j].T
+                    if self.cuda:
+                        tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
+                        tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
+                        dset[start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z).cpu()
+                        dset[start_j:end_j, start_i:end_i] = dset[start_i:end_i, start_j:end_j].T
+                    else:
+                        tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
+                        tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
+                        dset[start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z)
+                        dset[start_j:end_j, start_i:end_i] = dset[start_i:end_i, start_j:end_j].T
 
-        if invert is True:
-            dset = scipy.linalg.pinv(dset)
         print(f"leaf_id: {leaf_id}, len(X): {len(X)}")
-        #print(f['kxx_0'][::])
 
     def __display_buckets():
         pass
