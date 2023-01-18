@@ -11,8 +11,6 @@ import pickle
 from sklearn.metrics import classification_report
 from utils import revert_one_hot_encoding
 
-
-
 class TreedGaussianProcessClassifier:
 
     dir_kernel_matrix = "/kernel_matrix/"
@@ -45,8 +43,7 @@ class TreedGaussianProcessClassifier:
         if not isinstance(filename_tree, str) and filename_tree is not None:
             raise ValueError(f"filename_tree must be a string")
         if cuda:
-            assert torch.cuda.is_available() == True
-            
+            assert torch.cuda.is_available() == True            
 
         self.max_depth = max_depth
         
@@ -88,14 +85,13 @@ class TreedGaussianProcessClassifier:
         # delete h5py file
         pass
     
-
     def fit(self, train_x : np.ndarray, train_y : np.ndarray, patch_size : Tuple[int, int] = (60,60), 
         patch_step : int = 60, batch_size : int = 50) -> None:
         """
         fit fits a treed Gaussian process classifier to the given data
 
-        :param train_x: Data to train the classifier
-        :param train_y: Groundtruth of train_x
+        :param train_x: Data to train the classifier (num_samples, width, height)
+        :param train_y: Groundtruth of train_x (one-hot-encoded) (num_samples, width, height, num_classes)
         :param patch_size: window size of the patch. If (x,y) == (x_width,x_height) then no patches will be created
         :param patch_step: step to move the window of the patches
         :param batch_size: size of batch that is used to calculate the kernel matrix
@@ -115,8 +111,7 @@ class TreedGaussianProcessClassifier:
         if patch_step < 0:
             raise ValueError(f"patch_step must be non negative")
         if batch_size < 0:
-            raise ValueError(f"batch_size must be non negative")
-        
+            raise ValueError(f"batch_size must be non negative")       
 
         # create patches            
         self.train_x = []
@@ -171,7 +166,6 @@ class TreedGaussianProcessClassifier:
             node_id = prediction_node_id[i]
             # leaf_id starts from 1
             leaf_id = np.where(self.leaf_id_to_node_id == node_id)[0][0]
-            #print(f"leaf_id: {leaf_id}, i: {i}, node_id: {node_id}")
             self.image_id_to_leaf_id[i] = leaf_id
 
         # create a list index for the image
@@ -185,7 +179,7 @@ class TreedGaussianProcessClassifier:
         if self.kxx_exists is False:
             for idx, bucket in enumerate(self.buckets):
                 train_x_bucket = self.train_x[bucket]
-                self.__compute_kernel_matrix(train_x_bucket, batch_size = batch_size, leaf_id=idx)
+                self.__compute_kernel_matrix(train_x_bucket, batch_size = batch_size, leaf_id=idx, calc_c = True)
 
     def predict(self, X : np.ndarray) -> np.ndarray:
         """
@@ -195,6 +189,8 @@ class TreedGaussianProcessClassifier:
 
         return: segmented image
         """
+        # TODO return raw values with probabilites
+        # TODO patchify
         #if self.train_x.shape[1:] != X.shape[1:]:
         #    raise ValueError(f"Shape of X must be the same as for the training data")
 
@@ -215,32 +211,38 @@ class TreedGaussianProcessClassifier:
 
         return: segmented image of size (x,y)
         """
+
+        # compute kzx for the corresponding leaf node
         X_vec = X.reshape(1, X.shape[1] * X.shape[2])
         node_id_prediction = self.tree.apply(X_vec)[0]
         leaf_id = np.where(self.leaf_id_to_node_id == node_id_prediction)[0][0]
         X_bucket = self.buckets[leaf_id]
         if self.kzx_exists is False:                      
-            self.__compute_kernel_matrix(X, Z=self.train_x[X_bucket], leaf_id="pred")                                                                 
+            self.__compute_kernel_matrix(X, Z=self.train_x[X_bucket], leaf_id="pred", batch_size = 100)                                                                 
 
         tmp = self.train_y.reshape(self.train_y.shape[0], self.train_y.shape[1] * self.train_y.shape[2], self.num_classes)
         tmp = tmp[X_bucket]
 
         # train n different one_vs_rest classifier
         f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kxx, 'r')
-        dset_kxx = f[f'kxx_{leaf_id}']
+        dset_kxx = f[f'kxx_c_{leaf_id}']
         kxx = dset_kxx[0:dset_kxx.shape[0],0:dset_kxx.shape[1]]
         f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kzx, 'r')
         dset_kzx = f[f'kzx_pred_{self.prediction_count-1}']
         kzx = dset_kzx[0:dset_kzx.shape[0],0:dset_kzx.shape[1]]
         one_vs_rest = []
 
+        print(f"Predict {self.prediction_count-1}")
 
         for i in range(0, self.num_classes):
-            c = scipy.linalg.lstsq(kxx, self.__divide_in_classes(tmp, i), cond=1e-6)[0]
+            # TODO pre-calculate c in h5py -> do not calculate c for every prediction
+            #c = scipy.linalg.lstsq(kxx, self.__divide_in_classes(tmp, i), cond=1e-6, check_finite = False)[0]
+            c = dset_kxx[i]
             res = kzx @ c
             one_vs_rest.append(res)
         one_vs_rest = np.array(one_vs_rest)
 
+        # perform arg max over all one_vs_rest classifier to find predicted class
         result = np.zeros(self.train_y.shape[1] * self.train_y.shape[2])
         for i in range(one_vs_rest.shape[2]):
             classes = np.zeros(one_vs_rest.shape[0])
@@ -250,7 +252,13 @@ class TreedGaussianProcessClassifier:
 
         return result.reshape(X.shape[1], X.shape[2])
 
-    def eval_performance(self, test_x, groundtruth):
+    def eval_performance(self, test_x, groundtruth) -> None:
+        """
+        eval_performance evaluates the performance of the model using classification_report from scikit-learn
+
+        :param test_x: array of test images (num_images, height, width)
+        :param groundtruth: groundtruth of test_x (one-hot-encoded) (num_images, height, width, num_classes)
+        """
         prediction = np.zeros((len(test_x), test_x.shape[1], test_x.shape[2]))
         for idx, val in enumerate(test_x):
             v = val.reshape(1, test_x.shape[1], test_x.shape[2])
@@ -264,7 +272,6 @@ class TreedGaussianProcessClassifier:
             target_names += [f"Class {i}"]
         
         print(classification_report(groundtruth, prediction, target_names=target_names))
-
 
     def __relu(self, arr : np.ndarray) -> np.ndarray:
         """
@@ -280,6 +287,7 @@ class TreedGaussianProcessClassifier:
         """
         __divide_in_classes divides a given list into classes 
             (num_samples, num_features, num_classes) -> (num_samples, num_features) at given index
+            This is used for a one-vs-rest classifier setting.
 
         example:
         index = 0: [ [ [1,0,1], [0,0.567,1] ] ] ---> [ [ 1, 0 ] ]
@@ -325,7 +333,7 @@ class TreedGaussianProcessClassifier:
         return initial_model
 
     def __compute_kernel_matrix(self, X : np.ndarray, Z : np.ndarray =None, batch_size : int = 50, 
-        leaf_id : int = None) -> None:
+        leaf_id : int = None, calc_c : bool = False) -> None:
         """
         __compute_kernel_matrix computes the kernel matrix in batches. Because of the fact that
             k(x_1,x_2) = k(x_2,x_1) the kernel matrix is symmetric. Therefore, we can just compute 
@@ -337,8 +345,8 @@ class TreedGaussianProcessClassifier:
         :param Z: matrix X, numpy array of shape (num_samples, width, height). If Z is not given it will 
                 compute the kernel matrix K(X,X)
         :param batch_size: Number of samples used in one batch to compute the matrix
-        :param invert: If True it will invert the matrix in the end
         :param leaf_id: Leaf ID of the decision tree. Used to name the matrix
+        :param calc_c: calculates c for prediction (for kxx)
         """
         same = False
         if Z is None:
@@ -347,16 +355,22 @@ class TreedGaussianProcessClassifier:
 
         if same:
             f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kxx,'r+')
-            dset = f.create_dataset(f"kxx_{leaf_id}", (len(X),len(Z)), dtype='float32')
+            dset = f.create_dataset(f"kxx_{leaf_id}", (self.num_classes, len(X),len(Z)), dtype='float32')
         else:
             f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kzx,'r+')
             dset = f.create_dataset(f"kzx_{leaf_id}_{self.prediction_count}", (len(X),len(Z)), dtype='float32')
             self.prediction_count = self.prediction_count + 1
 
+        if calc_c:
+            # calculates c for prediction for each class
+            f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kxx,'r+')
+            dset_c = f.create_dataset(f"kxx_c_{leaf_id}", (self.num_classes, len(X), X.shape[1] * X.shape[2]), dtype='float32')
+
         shape_x = X.shape
         print(f"Calculate kernel matrix with dimensions {len(X),len(Z)} for leaf_id {leaf_id}")
         if len(X) == 1:
             for j in range(0, len(Z)+1, batch_size):
+                #print(f"Batch: (0,{j}) for leaf_id: {leaf_id}")
                 start_j = max(0, j-batch_size)
                 end_j = min(j + batch_size, len(Z))
 
@@ -383,15 +397,24 @@ class TreedGaussianProcessClassifier:
                     if self.cuda:
                         tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
                         tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
-                        dset[start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z).cpu()
-                        dset[start_j:end_j, start_i:end_i] = dset[start_i:end_i, start_j:end_j].T
+                        dset[0, start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z).cpu()
+                        dset[0, start_j:end_j, start_i:end_i] = dset[0, start_i:end_i, start_j:end_j].T
                     else:
                         tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
                         tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
-                        dset[start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z)
-                        dset[start_j:end_j, start_i:end_i] = dset[start_i:end_i, start_j:end_j].T
+                        dset[0, start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z)
+                        dset[0, start_j:end_j, start_i:end_i] = dset[0, start_i:end_i, start_j:end_j].T
 
-        print(f"leaf_id: {leaf_id}, len(X): {len(X)}")
+        if calc_c:
+            print('calculate c')
+            # compute kzx for the corresponding leaf node
+            X_bucket = self.buckets[leaf_id]                                                         
+            tmp = self.train_y.reshape(self.train_y.shape[0], self.train_y.shape[1] * self.train_y.shape[2], self.num_classes)
+            tmp = tmp[X_bucket]
+            for i in range(self.num_classes):
+                dset_c[i] = scipy.linalg.lstsq(dset[0], self.__divide_in_classes(tmp, i), cond=1e-6, check_finite = False)[0]
+            print('finished calculating c')
+
 
     def __display_buckets():
         pass
@@ -412,13 +435,29 @@ class TreedGaussianProcessClassifier:
         """
         return self.dir_main + self.dir_kernel_matrix
 
-    def set_path(self, path : str) -> None:
+    def set_path_matrix(self, path : str) -> None:
         """
-        set_path sets the path for the matrix files
+        set_path_matrix sets the path for the matrix files
 
         :param path: new path
         """
         self.dir_kernel_matrix = path
+
+    def set_path_tree(self, path : str) -> None:
+        """
+        set_path_tree sets the path for the decision tree files
+
+        :param path: new path
+        """
+        self.dir_deicison_tree = path
+
+    def set_path_base(self, path : str) -> None:
+        """
+        set_path_base sets the base directory
+
+        :param path: new path
+        """
+        self.dir_main = path
 
 
 

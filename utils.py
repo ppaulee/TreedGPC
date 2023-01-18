@@ -27,7 +27,18 @@ def class_to_rgb(image):
     return result
     
 def add_none_class(image):
-    res = np.pad(image, ((0,0),(0,0),(0,0),(1,0)))
+    """
+    add_none_class adds a new class (in our case background) to the data
+        Note that the new class will be class 0
+
+    param image: images of size (num_images, x, y, classes)
+
+    return: images of size (num_images, x, y, classes+1)
+    """
+    #res = np.pad(image, ((0,0),(0,0),(0,0),(1,0)))
+    num, x, y, classes = image.shape
+    res = np.zeros((num, x, y, classes+1))
+    res[:,:,:,1:] = image
     res = res.reshape((len(image), image.shape[1] * image.shape[2], image.shape[3]+1))
     for i in range(len(image)):
         res[i] = list(map(lambda_map, res[i]))
@@ -37,8 +48,6 @@ def lambda_map(a):
     if all(v == 0 for v in a):
         return [1 if i == 0 else a[i] for i in range(len(a))]
     return a
-
-
 
 def parse_mnist(arr):
     tmp = np.zeros((arr.shape[0], arr.shape[1] * arr.shape[2], 2))
