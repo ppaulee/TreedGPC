@@ -10,6 +10,7 @@ from typing import Tuple
 import pickle
 from sklearn.metrics import classification_report
 from utils import revert_one_hot_encoding
+import cupy as cp
 
 class TreedGaussianProcessClassifier:
 
@@ -86,14 +87,14 @@ class TreedGaussianProcessClassifier:
         pass
     
     def fit(self, train_x : np.ndarray, train_y : np.ndarray, patch_size : Tuple[int, int] = (60,60), 
-        patch_step : int = 60, batch_size : int = 50) -> None:
+        stride : int = 60, batch_size : int = 50) -> None:
         """
         fit fits a treed Gaussian process classifier to the given data
 
         :param train_x: Data to train the classifier (num_samples, width, height)
         :param train_y: Groundtruth of train_x (one-hot-encoded) (num_samples, width, height, num_classes)
         :param patch_size: window size of the patch. If (x,y) == (x_width,x_height) then no patches will be created
-        :param patch_step: step to move the window of the patches
+        :param stride: step to move the window of the patches
         :param batch_size: size of batch that is used to calculate the kernel matrix
         """ 
         # sanity checks
@@ -108,8 +109,8 @@ class TreedGaussianProcessClassifier:
             raise ValueError(f"train_x and train_y must be same dimensions - {shape_x[2]} is not {shape_y[2]}")
         if patch_size[0] < 0 or patch_size[1] < 0:
             raise ValueError(f"patch_size must be non negative")
-        if patch_step < 0:
-            raise ValueError(f"patch_step must be non negative")
+        if stride < 0:
+            raise ValueError(f"stride must be non negative")
         if batch_size < 0:
             raise ValueError(f"batch_size must be non negative")       
 
@@ -117,20 +118,22 @@ class TreedGaussianProcessClassifier:
         self.train_x = []
         self.train_y = []
         self.patch_size = patch_size
-        self.patch_step = patch_step
+        self.stride = stride
         for image in train_x:
-            tmp = patchify(image, patch_size, patch_step)
+            tmp = patchify(image, patch_size, stride)
             self.train_x.append(np.array(tmp).reshape(-1, patch_size[0], patch_size[1]))
         for image in train_y:
-            tmp = patchify(image, (patch_size[0], patch_size[1], self.num_classes), patch_step)
+            tmp = patchify(image, (patch_size[0], patch_size[1], self.num_classes), stride)
             self.train_y.append(np.array(tmp).reshape(-1, patch_size[0], patch_size[1], self.num_classes))
         self.train_y = np.array(self.train_y).reshape(-1, patch_size[0], patch_size[1], self.num_classes)
         self.train_x = np.array(self.train_x).reshape(-1, patch_size[0], patch_size[1])
         print("created image patches")
 
         # train decision tree
-        train_x_vec = train_x.reshape(shape_x[0], shape_x[1] * shape_x[2])
-        train_y_vec_eoh = train_y.reshape(shape_y[0], shape_y[1] * shape_y[2], shape_y[3])
+        shape_x = self.train_x.shape
+        shape_y = self.train_y.shape
+        train_x_vec = self.train_x.reshape(shape_x[0], shape_x[1] * shape_x[2])
+        train_y_vec_eoh = self.train_y.reshape(shape_y[0], shape_y[1] * shape_y[2], shape_y[3])
 
         # revert one hot encoding
         train_y_vec = np.zeros((shape_y[0], shape_y[1] * shape_y[2]))
@@ -235,8 +238,6 @@ class TreedGaussianProcessClassifier:
         print(f"Predict {self.prediction_count-1}")
 
         for i in range(0, self.num_classes):
-            # TODO pre-calculate c in h5py -> do not calculate c for every prediction
-            #c = scipy.linalg.lstsq(kxx, self.__divide_in_classes(tmp, i), cond=1e-6, check_finite = False)[0]
             c = dset_kxx[i]
             res = kzx @ c
             one_vs_rest.append(res)
@@ -367,7 +368,6 @@ class TreedGaussianProcessClassifier:
             dset_c = f.create_dataset(f"kxx_c_{leaf_id}", (self.num_classes, len(X), X.shape[1] * X.shape[2]), dtype='float32')
 
         shape_x = X.shape
-        print(f"Calculate kernel matrix with dimensions {len(X),len(Z)} for leaf_id {leaf_id}")
         if len(X) == 1:
             for j in range(0, len(Z)+1, batch_size):
                 #print(f"Batch: (0,{j}) for leaf_id: {leaf_id}")
@@ -383,6 +383,7 @@ class TreedGaussianProcessClassifier:
                     tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
                     dset[0, start_j:end_j] = self.kernel(tensor_x, tensor_z)
         else:
+            print(f"Calculate kernel matrix with dimensions {len(X),len(Z)} for leaf_id {leaf_id}")
             for i in range(0, len(X)+1, batch_size):
                 # use i as a start => calculate only upper triangular matrix
                 # kernel matrix is symmetric
@@ -412,7 +413,10 @@ class TreedGaussianProcessClassifier:
             tmp = self.train_y.reshape(self.train_y.shape[0], self.train_y.shape[1] * self.train_y.shape[2], self.num_classes)
             tmp = tmp[X_bucket]
             for i in range(self.num_classes):
-                dset_c[i] = scipy.linalg.lstsq(dset[0], self.__divide_in_classes(tmp, i), cond=1e-6, check_finite = False)[0]
+                if self.cuda:
+                    dset_c[i] = cp.linalg.lstsq(cp.asarray(dset[0]), cp.asarray(self.__divide_in_classes(tmp, i)), rcond=1e-6)[0].get()
+                else:
+                    dset_c[i] = scipy.linalg.lstsq(dset[0], self.__divide_in_classes(tmp, i), cond=1e-6, check_finite = False)[0]
             print('finished calculating c')
 
 

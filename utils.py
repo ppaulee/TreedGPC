@@ -16,7 +16,8 @@ mapping_class_to_rgb = [
     (255,255,0), #yellow
     (0,153,51), #green
     (204,0,204), #purple
-    (255, 0, 0) #brown   
+    (255, 0, 0), #brown   
+    (0, 0, 0) #black
 ]
 
 def class_to_rgb(image):
