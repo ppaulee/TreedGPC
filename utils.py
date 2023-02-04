@@ -11,13 +11,13 @@ def revert_one_hot_encoding(array):
     return new_train_y
 
 mapping_class_to_rgb = [
-    (255,255,255), #white
-    (0,0,255), #blue
-    (255,255,0), #yellow
-    (0,153,51), #green
-    (204,0,204), #purple
-    (255, 0, 0), #brown   
-    (0, 0, 0) #black
+    (255,255,255), #white -> background
+    (0,0,255), #blue -> 0
+    (255,255,0), #yellow -> 1
+    (0,153,51), #green -> 2
+    (204,0,204), #purple -> 3
+    (255, 0, 0), #brown -> 4
+    (0, 0, 0) #black -> 5
 ]
 
 def class_to_rgb(image):

@@ -13,22 +13,14 @@ start = datetime.datetime.now()
 var_bias = 7.86
 var_weight = 2.79
 kernel = Sequential(
-    Conv2d(kernel_size=7, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
+    Conv2d(kernel_size=15, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
     ReLU(),
-    Conv2d(kernel_size=7, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
+    Conv2d(kernel_size=3, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
     ReLU(),
-    Conv2d(kernel_size=7, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
-    ReLU(),
-    Conv2d(kernel_size=7, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
-    ReLU(),
-    Conv2d(kernel_size=7, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
-    ReLU(),
-    Conv2d(kernel_size=7, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
-    ReLU(),
-    Conv2d(kernel_size=7, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
+    Conv2d(kernel_size=3, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
     ReLU(),  # Total 7 layers before dense
     # Dense Layer
-    Conv2d(kernel_size=20, padding=0, var_weight=var_weight, var_bias=var_bias))
+    Conv2d(kernel_size=60, padding=0, var_weight=var_weight, var_bias=var_bias))
 
 #treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=4, cuda = True, filename_tree='tree_10000.pkl', 
 #   filename_kxx='kxx_10000_')
@@ -38,11 +30,11 @@ treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_d
 #treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=4, filename_tree="model_10000.pkl",
 #   filename_kxx="kxx_10000")
 
-num_training_samples = 10000
+num_training_samples = 200
 
 #"""
 train_x, train_y, test_x, test_y = create_semantic_segmentation_dataset(num_train_samples=num_training_samples,
-                                                                        num_test_samples=1000,
+                                                                        num_test_samples=100,
                                                                         image_shape=(60, 60),
                                                                         num_classes=5,
                                                                         labels_are_exclusive=True)
@@ -59,7 +51,8 @@ np.ceil(tmp.astype(float), out=tmp)
 print("preparing to fit data")
 
 # batch size 200 for 8GB of GPU RAM
-treed_gpc.fit(train_x.reshape(num_training_samples,60,60), tmp, batch_size = 200, patch_size=(20,20), stride = 10)
+treed_gpc.fit(train_x.reshape(num_training_samples,60,60), tmp, batch_size = 200)
+#, patch_size=(20,20), stride = 5)
 
 print("finished fit")
 print(test_x[0].shape)
@@ -88,7 +81,8 @@ print(f"total time: {end-start}")
 # 0:30:52.478438 on 10000 images with cuda and cupy
 
 start = datetime.datetime.now()
-treed_gpc.eval_performance(test_x[:1000], test_y[:1000])
+performance = treed_gpc.eval_performance(test_x[:1000], test_y[:1000])
+print(performance)
 end = datetime.datetime.now()
 print(f"total time for prediction: {end-start}")
 

@@ -272,7 +272,7 @@ class TreedGaussianProcessClassifier:
         for i in range(self.num_classes):
             target_names += [f"Class {i}"]
         
-        print(classification_report(groundtruth, prediction, target_names=target_names))
+        return classification_report(groundtruth, prediction, target_names=target_names, output_dict = True)
 
     def __relu(self, arr : np.ndarray) -> np.ndarray:
         """
@@ -414,7 +414,9 @@ class TreedGaussianProcessClassifier:
             tmp = tmp[X_bucket]
             for i in range(self.num_classes):
                 if self.cuda:
-                    dset_c[i] = cp.linalg.lstsq(cp.asarray(dset[0]), cp.asarray(self.__divide_in_classes(tmp, i)), rcond=1e-6)[0].get()
+                    cp_A = cp.asarray(dset[0])
+                    cp_b = cp.asarray(self.__divide_in_classes(tmp, i))
+                    dset_c[i] = cp.linalg.lstsq(cp_A, cp_b, rcond=1e-6)[0].get()
                 else:
                     dset_c[i] = scipy.linalg.lstsq(dset[0], self.__divide_in_classes(tmp, i), cond=1e-6, check_finite = False)[0]
             print('finished calculating c')
