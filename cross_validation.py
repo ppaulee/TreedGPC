@@ -56,12 +56,46 @@ def cross_validate(X, y, kernel, max_depth):
         tmp = add_none_class(train_y)
         np.ceil(tmp.astype(float), out=tmp)
         # batch size 200 for 8GB of GPU RAM
-        treed_gpc.fit(train_x.reshape(len(train_x),60,60), tmp, batch_size = 200)
+        treed_gpc.fit(train_x.reshape(len(train_x),60,60), tmp, batch_size = 200, patch_size=(20,20), stride = 10)
         performance = treed_gpc.eval_performance(test_x, test_y)
         f1[i] = performance['macro avg']['f1-score']
     print(np.mean(f1))
     return np.mean(f1)
 
+number_layers = 5
+cross = {}
+for i in range(5):
+    arr = np.repeat(3, 3)
+    kernel_arr = np.concatenate(([15], arr, [20]), axis = None)
+    print(kernel_arr)
+    kernel = create_kernel(kernel_arr, 4)
+    cross[str(i)] = cross_validate(train_x, train_y, kernel, i)
+print(cross)
 
-kernel = create_kernel([15,3,3,60], 3)
-cross_validate(train_x, train_y, kernel, 4)
+'''
+kernel layers
+{'[15 20]': 0.2184690940640232, 
+'[15  3 20]': 0.21767094724214014, 
+'[15  3  3 20]': 0.21630948067830102, 
+'[15  3  3  3 20]': 0.21487239469901423, 
+'[15  3  3  3  3 20]': 0.2134721371416745}
+
+input kernel size
+{'10': 0.21722967084063088, 
+'11': 0.2165183567807721, 
+'12': 0.21647647851863838, 
+'13': 0.21665142997206047, 
+'14': 0.21673908702296973, 
+'15': 0.21693095155407827, 
+'16': 0.21640057544269978, 
+'17': 0.21625899673318197, 
+'18': 0.21615087091716187, 
+'19': 0.21643898250595686}
+
+tree height
+{'0': 0.20995855527107343, 
+'1': 0.21159509416822758, 
+'2': 0.21070076597978277, 
+'3': 0.20611343486579253, 
+'4': 0.20460346720027256}
+'''
