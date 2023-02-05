@@ -20,17 +20,18 @@ kernel = Sequential(
     Conv2d(kernel_size=3, padding="same", var_weight=var_weight * 7**2, var_bias=var_bias),
     ReLU(),  # Total 7 layers before dense
     # Dense Layer
-    Conv2d(kernel_size=60, padding=0, var_weight=var_weight, var_bias=var_bias))
+    Conv2d(kernel_size=20, padding=0, var_weight=var_weight, var_bias=var_bias))
 
 #treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=4, cuda = True, filename_tree='tree_10000.pkl', 
 #   filename_kxx='kxx_10000_')
 
-treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=4, cuda = True)
+# macro avg f1: 0.19986049243837578
+treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = True)
 
 #treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=4, filename_tree="model_10000.pkl",
 #   filename_kxx="kxx_10000")
 
-num_training_samples = 200
+num_training_samples = 1000
 
 #"""
 train_x, train_y, test_x, test_y = create_semantic_segmentation_dataset(num_train_samples=num_training_samples,
@@ -45,14 +46,13 @@ print(f"train_y shape: {train_y.shape}")
 print("Add background class")
 tmp = add_none_class(train_y)
 print("Finished adding the background class")
-
+print(tmp.shape)
 #tmp = np.ceil(tmp.astype(float))
 np.ceil(tmp.astype(float), out=tmp)
 print("preparing to fit data")
 
 # batch size 200 for 8GB of GPU RAM
-treed_gpc.fit(train_x.reshape(num_training_samples,60,60), tmp, batch_size = 200)
-#, patch_size=(20,20), stride = 5)
+treed_gpc.fit(train_x.reshape(num_training_samples,60,60), tmp, batch_size = 500, patch_size=(20,20), stride = 5)
 
 print("finished fit")
 print(test_x[0].shape)

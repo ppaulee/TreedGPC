@@ -155,6 +155,9 @@ class TreedGaussianProcessClassifier:
                 self.tree = pickle.load(f)
             print("successfully loaded decision tree from disk")
 
+        del train_y_vec
+        del train_y_vec_eoh
+
         # each image corresponds to a leaf node in the decision tree
         # prediction_node_id defines the node_id to the corresponding image
         # node_id ranges from 0 to the number of nodes in the tree
@@ -183,6 +186,8 @@ class TreedGaussianProcessClassifier:
             for idx, bucket in enumerate(self.buckets):
                 train_x_bucket = self.train_x[bucket]
                 self.__compute_kernel_matrix(train_x_bucket, batch_size = batch_size, leaf_id=idx, calc_c = True)
+        
+        del train_x_vec
 
     def predict(self, X : np.ndarray) -> np.ndarray:
         """
@@ -206,13 +211,14 @@ class TreedGaussianProcessClassifier:
 
         return unpatchify(patches_predict, X[0].shape)
 
-    def __predict_raw(self, X : np.ndarray) -> np.ndarray:
+    def __predict_raw(self, X : np.ndarray, proba = False) -> np.ndarray:
         """
         __predict_raw predicts a new data instance
 
         param X: new data instance; array of shape (1,x,y)
+        param proba: return raw probabilities
 
-        return: segmented image of size (x,y)
+        return: segmented image of size (x,y) if proba True then size is (x,y,num_classes)
         """
 
         # compute kzx for the corresponding leaf node
@@ -226,31 +232,28 @@ class TreedGaussianProcessClassifier:
         tmp = self.train_y.reshape(self.train_y.shape[0], self.train_y.shape[1] * self.train_y.shape[2], self.num_classes)
         tmp = tmp[X_bucket]
 
-        # train n different one_vs_rest classifier
         f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kxx, 'r')
         dset_kxx = f[f'kxx_c_{leaf_id}']
-        kxx = dset_kxx[0:dset_kxx.shape[0],0:dset_kxx.shape[1]]
         f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kzx, 'r')
         dset_kzx = f[f'kzx_pred_{self.prediction_count-1}']
         kzx = dset_kzx[0:dset_kzx.shape[0],0:dset_kzx.shape[1]]
-        one_vs_rest = []
 
         print(f"Predict {self.prediction_count-1}")
+        # shape y: (width, height, num_classes) one-hot-encoded
+        # f = Kzx @ Kxx^-1 @ y 
+        # Kxx @ c = y => c = Kxx^-1 @ y
+        # => f = Kzx @ c
+        c = dset_kxx[0]
+        res = np.dot(kzx, c)
+        # reshape for a one-hot-encoding
+        res = res.reshape(self.train_y.shape[1] * self.train_y.shape[2], self.num_classes)
 
-        for i in range(0, self.num_classes):
-            c = dset_kxx[i]
-            res = kzx @ c
-            one_vs_rest.append(res)
-        one_vs_rest = np.array(one_vs_rest)
+        if proba:
+            return res
 
         # perform arg max over all one_vs_rest classifier to find predicted class
-        result = np.zeros(self.train_y.shape[1] * self.train_y.shape[2])
-        for i in range(one_vs_rest.shape[2]):
-            classes = np.zeros(one_vs_rest.shape[0])
-            for c in range(one_vs_rest.shape[0]):
-                classes[c] = one_vs_rest[c][0][i]
-            result[i] = np.argmax(self.__relu(classes))
-
+        result = np.array(list(map(np.argmax, res)))
+        
         return result.reshape(X.shape[1], X.shape[2])
 
     def eval_performance(self, test_x, groundtruth) -> None:
@@ -365,7 +368,8 @@ class TreedGaussianProcessClassifier:
         if calc_c:
             # calculates c for prediction for each class
             f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kxx,'r+')
-            dset_c = f.create_dataset(f"kxx_c_{leaf_id}", (self.num_classes, len(X), X.shape[1] * X.shape[2]), dtype='float32')
+            dset_c = f.create_dataset(f"kxx_c_{leaf_id}", (1, len(X), X.shape[1] * X.shape[2] * self.num_classes), dtype='float32')
+            #dset_c = f.create_dataset(f"kxx_c_{leaf_id}", (len(X), X.shape[1] * X.shape[2] * self.num_classes), dtype='float32')
 
         shape_x = X.shape
         if len(X) == 1:
@@ -400,6 +404,8 @@ class TreedGaussianProcessClassifier:
                         tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
                         dset[0, start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z).cpu()
                         dset[0, start_j:end_j, start_i:end_i] = dset[0, start_i:end_i, start_j:end_j].T
+                        del tensor_x
+                        del tensor_z
                     else:
                         tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
                         tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
@@ -412,14 +418,26 @@ class TreedGaussianProcessClassifier:
             X_bucket = self.buckets[leaf_id]                                                         
             tmp = self.train_y.reshape(self.train_y.shape[0], self.train_y.shape[1] * self.train_y.shape[2], self.num_classes)
             tmp = tmp[X_bucket]
-            for i in range(self.num_classes):
-                if self.cuda:
-                    cp_A = cp.asarray(dset[0])
-                    cp_b = cp.asarray(self.__divide_in_classes(tmp, i))
-                    dset_c[i] = cp.linalg.lstsq(cp_A, cp_b, rcond=1e-6)[0].get()
-                else:
-                    dset_c[i] = scipy.linalg.lstsq(dset[0], self.__divide_in_classes(tmp, i), cond=1e-6, check_finite = False)[0]
+            if self.cuda:
+                cp_A = cp.asarray(dset[0])
+                cp_b = cp.asarray(tmp.reshape(tmp.shape[0], tmp.shape[1] * tmp.shape[2]))         
+                dset_c[0] = cp.linalg.lstsq(cp_A, cp_b, rcond=1e-6)[0].get().reshape(dset[0].shape[0], 
+                    self.train_y.shape[1] * self.train_y.shape[2] * self.num_classes)
+                #dset_c = cp.linalg.lstsq(cp_A, cp_b, rcond=1e-6)[0].get().reshape(dset[0].shape[0], 
+                #    self.train_y.shape[1] * self.train_y.shape[2] * self.num_classes)
+                del cp_A
+                del cp_b
+            else:
+                #dset_c[i] = scipy.linalg.lstsq(dset[0], self.__divide_in_classes(tmp, i), cond=1e-6, check_finite = False)[0]
+                dset_c[0] = scipy.linalg.lstsq(dset[0], tmp.reshape(tmp.shape[0], tmp.shape[1] * tmp.shape[2]), rcond=1e-6)[0].reshape(dset[0].shape[0], 
+                    self.train_y.shape[1] * self.train_y.shape[2] * self.num_classes)
             print('finished calculating c')
+
+        # clear all GPU memory
+        mempool = cp.get_default_memory_pool()
+        pinned_mempool = cp.get_default_pinned_memory_pool()
+        mempool.free_all_blocks()
+        pinned_mempool.free_all_blocks()
 
 
     def __display_buckets():
