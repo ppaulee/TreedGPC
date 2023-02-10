@@ -6,6 +6,9 @@ from cnn_gp import Sequential, Conv2d, ReLU
 import numpy as np
 import datetime
 
+# run renders
+# python3.10 /mnt/d/_uni/_thesis/code/blender_images/blender/blenderconfig/main.py "/usr/bin/blender" "/mnt/d/_uni/_thesis/code/blender_images/blender/cell03.blend"
+
 np.random.seed(seed=9)
 
 start = datetime.datetime.now()
@@ -26,16 +29,17 @@ kernel = Sequential(
 #   filename_kxx='kxx_10000_')
 
 # macro avg f1: 0.19986049243837578
-treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = True)
+treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = True, filename_tree = "model_c8283499b84c4c20a749f6c6885db5b3.pkl", filename_kxx = "kxx_e924d0a0de8040968f4421a16f45fd0d")
+#treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = True)
 
 #treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=4, filename_tree="model_10000.pkl",
 #   filename_kxx="kxx_10000")
 
-num_training_samples = 1000
+num_training_samples = 200
 
 #"""
 train_x, train_y, test_x, test_y = create_semantic_segmentation_dataset(num_train_samples=num_training_samples,
-                                                                        num_test_samples=100,
+                                                                        num_test_samples=20,
                                                                         image_shape=(60, 60),
                                                                         num_classes=5,
                                                                         labels_are_exclusive=True)
@@ -44,27 +48,34 @@ print(f"train_x shape: {train_x.shape}")
 print(f"train_y shape: {train_y.shape}")
 
 print("Add background class")
-tmp = add_none_class(train_y)
+
+train_y = add_none_class(train_y)
+test_y = add_none_class(test_y)
+
+
 print("Finished adding the background class")
-print(tmp.shape)
+print(train_y.shape)
 #tmp = np.ceil(tmp.astype(float))
-np.ceil(tmp.astype(float), out=tmp)
+np.ceil(train_y.astype(float), out=train_y)
 print("preparing to fit data")
 
 # batch size 200 for 8GB of GPU RAM
-treed_gpc.fit(train_x.reshape(num_training_samples,60,60), tmp, batch_size = 500, patch_size=(20,20), stride = 5)
+treed_gpc.fit(train_x.reshape(num_training_samples,60,60), train_y, batch_size = 500, patch_size=(20,20), stride = 5)
+
+#treed_gpc.display_buckets()
 
 print("finished fit")
 print(test_x[0].shape)
-result = treed_gpc.predict(test_x[0].reshape(1,60,60))
-print(f"shape result: {result.shape}")
+for i in range(0):
+    result = treed_gpc.predict(test_x[i].reshape(1,60,60))
+    print(f"shape result: {result.shape}")
 
-result_rgb = class_to_rgb(result).reshape(60,60,3)
-result_rgb = result_rgb.astype(np.uint8)
+    result_rgb = class_to_rgb(result).reshape(60,60,3)
+    result_rgb = result_rgb.astype(np.uint8)
 
-import matplotlib.image
-matplotlib.image.imsave('name.png', result_rgb)
-matplotlib.image.imsave('groundtruth.png', test_x[0].reshape(test_x[0].shape[0], test_x[0].shape[1]), cmap='gray')
+    import matplotlib.image
+    matplotlib.image.imsave(f'prediction_{i}.png', result_rgb)
+    matplotlib.image.imsave(f'groundtruth_{i}.png', test_x[i].reshape(test_x[i].shape[0], test_x[i].shape[1]), cmap='gray')
 
 end = datetime.datetime.now()
 print(f"total time: {end-start}")
@@ -82,9 +93,15 @@ print(f"total time: {end-start}")
 
 start = datetime.datetime.now()
 performance = treed_gpc.eval_performance(test_x[:1000], test_y[:1000])
+#performance = treed_gpc.eval_performance(test_x[3], test_y[3])
+""" 
+matplotlib.image.imsave(f'test___x__{i}.png', test_x[3].reshape(test_x[3].shape[0], test_x[3].shape[1]), cmap='gray')
+
+result_rgb = class_to_rgb(test).reshape(60,60,3)
+result_rgb = result_rgb.astype(np.uint8)
+matplotlib.image.imsave(f'test__y__{i}.png', result_rgb) 
+"""
+
 print(performance)
 end = datetime.datetime.now()
 print(f"total time for prediction: {end-start}")
-
-
-

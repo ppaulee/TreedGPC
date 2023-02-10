@@ -11,6 +11,9 @@ import pickle
 from sklearn.metrics import classification_report
 from utils import revert_one_hot_encoding
 import cupy as cp
+from pathlib import Path
+import matplotlib.image
+from scipy.special import expit
 
 class TreedGaussianProcessClassifier:
 
@@ -165,6 +168,11 @@ class TreedGaussianProcessClassifier:
         # maps [0,num_leaf_ids] -> node_id
         self.leaf_id_to_node_id = np.unique(prediction_node_id)
 
+        self.node_id_to_leaf_id = np.full(self.leaf_id_to_node_id.max()+1, -1, dtype=int)
+        for i in range(len(self.leaf_id_to_node_id)):
+            node_id = self.leaf_id_to_node_id[i]
+            self.node_id_to_leaf_id[node_id] = i
+
         # maps image_id to the corresponding leaf id
         self.image_id_to_leaf_id = np.zeros(len(train_x_vec), dtype=np.int64)
         for i in range(0, len(train_x_vec)):
@@ -197,35 +205,45 @@ class TreedGaussianProcessClassifier:
 
         return: segmented image
         """
-        # TODO return raw values with probabilites
-        # TODO patchify
         #if self.train_x.shape[1:] != X.shape[1:]:
         #    raise ValueError(f"Shape of X must be the same as for the training data")
 
-        patches = patchify(X[0], self.patch_size, step=self.patch_size[0])
+        patches = patchify(X[0], self.patch_size, step=self.stride)
         shape = patches.shape
-        patches_predict = np.zeros(shape)
+
+        # patches[y][x]
+        result = np.zeros((X.shape[1], X.shape[2], self.num_classes))
         for i in range(shape[0]):
             for j in range(shape[1]):
-                patches_predict[i][j] = self.__predict_raw(np.array([patches[i][j]]))
+                
+                predicted = self.__predict_raw(np.array([patches[i][j]]), proba=True)
+                x_pad = (self.stride * i, X.shape[1] - self.patch_size[0] - self.stride * i)
+                y_pad = (self.stride * j, X.shape[2] - self.patch_size[1] - self.stride * j)
 
-        return unpatchify(patches_predict, X[0].shape)
+                patch = np.pad(predicted, (x_pad, y_pad, (0,0)), 'constant', constant_values=0)
+                result = np.add(result, patch)
+
+        return np.argmax(result, axis=2)
 
     def __predict_raw(self, X : np.ndarray, proba = False) -> np.ndarray:
         """
         __predict_raw predicts a new data instance
 
-        param X: new data instance; array of shape (1,x,y)
-        param proba: return raw probabilities
+        param X: new data instance; array of shape (n,x,y)
+        param proba: return raw probabilities instead of class labels
 
         return: segmented image of size (x,y) if proba True then size is (x,y,num_classes)
         """
 
         # compute kzx for the corresponding leaf node
-        X_vec = X.reshape(1, X.shape[1] * X.shape[2])
+        X_vec = X.reshape(X.shape[0], X.shape[1] * X.shape[2])
         node_id_prediction = self.tree.apply(X_vec)[0]
-        leaf_id = np.where(self.leaf_id_to_node_id == node_id_prediction)[0][0]
+        #leaf_id_1 = np.where(self.leaf_id_to_node_id == node_id_prediction)[0][0]
+        leaf_id = self.node_id_to_leaf_id[node_id_prediction]
+        #print(leaf_id_1 == leaf_id)
         X_bucket = self.buckets[leaf_id]
+
+        #exit()
         if self.kzx_exists is False:                      
             self.__compute_kernel_matrix(X, Z=self.train_x[X_bucket], leaf_id="pred", batch_size = 100)                                                                 
 
@@ -238,22 +256,26 @@ class TreedGaussianProcessClassifier:
         dset_kzx = f[f'kzx_pred_{self.prediction_count-1}']
         kzx = dset_kzx[0:dset_kzx.shape[0],0:dset_kzx.shape[1]]
 
-        print(f"Predict {self.prediction_count-1}")
+        #print(f"Predict {self.prediction_count-1}")
         # shape y: (width, height, num_classes) one-hot-encoded
         # f = Kzx @ Kxx^-1 @ y 
         # Kxx @ c = y => c = Kxx^-1 @ y
         # => f = Kzx @ c
         c = dset_kxx[0]
-        res = np.dot(kzx, c)
+        if self.cuda:
+            res = cp.dot(kzx, c)
+        else: 
+            res = np.dot(kzx, c)
         # reshape for a one-hot-encoding
         res = res.reshape(self.train_y.shape[1] * self.train_y.shape[2], self.num_classes)
 
         if proba:
-            return res
+            res = self.__sigmoid(res)
+            return res.reshape(X.shape[1], X.shape[2], self.num_classes)
 
         # perform arg max over all one_vs_rest classifier to find predicted class
         result = np.array(list(map(np.argmax, res)))
-        
+        del res
         return result.reshape(X.shape[1], X.shape[2])
 
     def eval_performance(self, test_x, groundtruth) -> None:
@@ -265,6 +287,7 @@ class TreedGaussianProcessClassifier:
         """
         prediction = np.zeros((len(test_x), test_x.shape[1], test_x.shape[2]))
         for idx, val in enumerate(test_x):
+            print(f"Predict {idx+1}/{len(test_x)}")
             v = val.reshape(1, test_x.shape[1], test_x.shape[2])
             prediction[idx] = self.predict(v)
         prediction = prediction.reshape(len(test_x) * test_x.shape[1] * test_x.shape[2])
@@ -272,9 +295,11 @@ class TreedGaussianProcessClassifier:
         groundtruth = groundtruth.reshape(len(groundtruth) * groundtruth.shape[1] * groundtruth.shape[2])
 
         target_names = []
-        for i in range(self.num_classes):
+        target_names += ['Background']
+        for i in range(self.num_classes-1):
             target_names += [f"Class {i}"]
-        
+        #print("finished evaulating performance")
+        #print(classification_report(groundtruth, prediction, target_names=target_names))
         return classification_report(groundtruth, prediction, target_names=target_names, output_dict = True)
 
     def __relu(self, arr : np.ndarray) -> np.ndarray:
@@ -286,6 +311,9 @@ class TreedGaussianProcessClassifier:
         :return: f(x)=max(0,x)
         """
         return np.maximum(arr, np.zeros(len(arr)))
+
+    def __sigmoid(self, arr : np.ndarray) -> np.ndarray:
+        return expit(arr)
 
     def __divide_in_classes(self, arr : np.ndarray, index : int) -> np.ndarray:
         """
@@ -352,6 +380,8 @@ class TreedGaussianProcessClassifier:
         :param leaf_id: Leaf ID of the decision tree. Used to name the matrix
         :param calc_c: calculates c for prediction (for kxx)
         """
+
+        # TODO subsample images, remove only white images
         same = False
         if Z is None:
             Z = X
@@ -406,12 +436,14 @@ class TreedGaussianProcessClassifier:
                         dset[0, start_j:end_j, start_i:end_i] = dset[0, start_i:end_i, start_j:end_j].T
                         del tensor_x
                         del tensor_z
+                        torch.cuda.empty_cache()
                     else:
                         tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
                         tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
                         dset[0, start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z)
                         dset[0, start_j:end_j, start_i:end_i] = dset[0, start_i:end_i, start_j:end_j].T
 
+        torch.cuda.empty_cache()
         if calc_c:
             print('calculate c')
             # compute kzx for the corresponding leaf node
@@ -439,9 +471,27 @@ class TreedGaussianProcessClassifier:
         mempool.free_all_blocks()
         pinned_mempool.free_all_blocks()
 
+    def display_buckets(self, dir = "./buckets/", prob = 0.1):
+        """
+        display_buckets saves the images of all decision tree leaves in "<dir>/<leaf_id>"
 
-    def __display_buckets():
-        pass
+        :param dir: base directory
+        :param prob: probability that the image will be saved
+        """
+        for idx, bucket in enumerate(self.buckets):
+            Path(dir + str(idx)).mkdir(parents=True, exist_ok=True)
+            train_x_bucket = self.train_x[bucket]
+            n = len(train_x_bucket)
+            probs = np.random.binomial(n=1, p=prob, size=n)
+            zipped = np.array(list(zip(train_x_bucket,probs)))
+            filter = np.asarray([1])
+            filtered = zipped[np.in1d(zipped[:, 1], filter)]
+            for i, image in enumerate(filtered):
+                img = image[0]                
+                matplotlib.image.imsave(f'{dir}/{idx}/groundtruth_{i}.png', img.reshape(img.shape[0], img.shape[1]), cmap='gray')
+
+                
+        
 
     def get_filenames(self) -> Tuple[str, str, str]:
         """

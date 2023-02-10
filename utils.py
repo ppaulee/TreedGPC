@@ -8,6 +8,7 @@ def revert_one_hot_encoding(array):
         for i in range(len(array[num_images])):
             for j in range(len(array[num_images][i])):
                 new_train_y[num_images][i][j] = np.argmax(array[num_images][i][j])   
+
     return new_train_y
 
 mapping_class_to_rgb = [
@@ -16,7 +17,7 @@ mapping_class_to_rgb = [
     (255,255,0), #yellow -> 1
     (0,153,51), #green -> 2
     (204,0,204), #purple -> 3
-    (255, 0, 0), #brown -> 4
+    (255, 0, 0), #red -> 4
     (0, 0, 0) #black -> 5
 ]
 
