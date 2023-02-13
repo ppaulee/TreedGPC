@@ -7,7 +7,19 @@ import numpy as np
 import datetime
 
 # run renders
-# python3.10 /mnt/d/_uni/_thesis/code/blender_images/blender/blenderconfig/main.py "/usr/bin/blender" "/mnt/d/_uni/_thesis/code/blender_images/blender/cell03.blend"
+# python3.10 /mnt/d/_uni/_thesis/code/blender_images/blender/blenderconfig/main.py "/home/paul/blender-3.0.0-linux-x64/blender" "/mnt/d/_uni/_thesis/code/blender_images/blender/cell03_original.blend"
+# python D:\\_uni\\_thesis\\code\\blender_images\\blender\\blenderconfig\\main.py "D:\\Program Files\\Blender Foundation\\Blender 3.4\\3.4\\python\\bin\\python.exe" "D:\\_uni\\_thesis\\code\\blender_images\\blender\\cell03_original.blend"
+
+
+#python D:/_uni/_thesis/code/blender_images/blender/blenderconfig/main.py "D:/Program Files/Blender Foundation/Blender 3.4/3.4/python/bin/python.exe" "D:/_uni/_thesis/code/blender_images/blender/cell03_original.blend"
+
+'''
+"D:\\Program Files\\Blender Foundation\\Blender 3.4\\3.4\\python\\bin\\python.exe" 
+"D:\\_uni\\_thesis\\code\\blender_images\\blender\\cell03_new.blend"  
+--background 
+--python "D:\\_uni\\_thesis\\code\\blender_images\\blender\\blenderconfig\\blender_render.py" 
+-- "D:\\_uni\\_thesis\\code\\blender_images\\blender\\renders_config\\render_config.00446.json"
+'''
 
 np.random.seed(seed=9)
 
@@ -29,8 +41,8 @@ kernel = Sequential(
 #   filename_kxx='kxx_10000_')
 
 # macro avg f1: 0.19986049243837578
-treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = True, filename_tree = "model_c8283499b84c4c20a749f6c6885db5b3.pkl", filename_kxx = "kxx_e924d0a0de8040968f4421a16f45fd0d")
-#treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = True)
+#treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = True, filename_tree = "model_c8283499b84c4c20a749f6c6885db5b3.pkl", filename_kxx = "kxx_e924d0a0de8040968f4421a16f45fd0d")
+treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = True)
 
 #treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=4, filename_tree="model_10000.pkl",
 #   filename_kxx="kxx_10000")
@@ -60,14 +72,14 @@ np.ceil(train_y.astype(float), out=train_y)
 print("preparing to fit data")
 
 # batch size 200 for 8GB of GPU RAM
-treed_gpc.fit(train_x.reshape(num_training_samples,60,60), train_y, batch_size = 500, patch_size=(20,20), stride = 5)
+treed_gpc.fit(train_x.reshape(num_training_samples,60,60,1), train_y, batch_size = 500, patch_size=(20,20,1), stride = 5)
 
 #treed_gpc.display_buckets()
 
 print("finished fit")
 print(test_x[0].shape)
-for i in range(0):
-    result = treed_gpc.predict(test_x[i].reshape(1,60,60))
+for i in range(5):
+    result = treed_gpc.predict(test_x[i].reshape(1,60,60,1))
     print(f"shape result: {result.shape}")
 
     result_rgb = class_to_rgb(result).reshape(60,60,3)
@@ -79,7 +91,7 @@ for i in range(0):
 
 end = datetime.datetime.now()
 print(f"total time: {end-start}")
-
+exit()
 # 0:00:58.919398 on 100 images with cuda
 # 0:00:26.375704 on 100 images without cuda
 #
@@ -92,7 +104,7 @@ print(f"total time: {end-start}")
 # 0:30:52.478438 on 10000 images with cuda and cupy
 
 start = datetime.datetime.now()
-performance = treed_gpc.eval_performance(test_x[:1000], test_y[:1000])
+performance = treed_gpc.eval_performance(test_x[:1000].reshape(num_training_samples,60,60,1), test_y[:1000])
 #performance = treed_gpc.eval_performance(test_x[3], test_y[3])
 """ 
 matplotlib.image.imsave(f'test___x__{i}.png', test_x[3].reshape(test_x[3].shape[0], test_x[3].shape[1]), cmap='gray')

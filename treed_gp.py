@@ -5,7 +5,7 @@ from sklearn import tree
 import numpy as np
 import h5py
 import uuid
-from patchify import patchify, unpatchify
+from patchify import patchify
 from typing import Tuple
 import pickle
 from sklearn.metrics import classification_report
@@ -14,6 +14,7 @@ import cupy as cp
 from pathlib import Path
 import matplotlib.image
 from scipy.special import expit
+from sklearn.decomposition import PCA
 
 class TreedGaussianProcessClassifier:
 
@@ -24,7 +25,7 @@ class TreedGaussianProcessClassifier:
     prediction_count = 0
 
     def __init__(self, kernel, num_classes : int, max_depth : int = 5, filename_kxx : str = None, 
-        filename_kzx : str = None, filename_tree : str = None, cuda : bool = False):
+        filename_kzx : str = None, filename_tree : str = None, cuda : bool = False, use_PCA = False):
         """
         __init__ initializes a new instance of a TreedGaussianProcessClassifier
 
@@ -50,6 +51,7 @@ class TreedGaussianProcessClassifier:
             assert torch.cuda.is_available() == True            
 
         self.max_depth = max_depth
+        self.use_PCA = use_PCA
         
         self.kernel = kernel
         if cuda:
@@ -122,30 +124,39 @@ class TreedGaussianProcessClassifier:
         self.train_y = []
         self.patch_size = patch_size
         self.stride = stride
+
+        print(train_x.shape)
+        print(self.patch_size)
+
         for image in train_x:
             tmp = patchify(image, patch_size, stride)
-            self.train_x.append(np.array(tmp).reshape(-1, patch_size[0], patch_size[1]))
+            self.train_x.append(np.array(tmp).reshape(-1, patch_size[0], patch_size[1], patch_size[2]))
         for image in train_y:
+            print(train_y.shape)
             tmp = patchify(image, (patch_size[0], patch_size[1], self.num_classes), stride)
             self.train_y.append(np.array(tmp).reshape(-1, patch_size[0], patch_size[1], self.num_classes))
         self.train_y = np.array(self.train_y).reshape(-1, patch_size[0], patch_size[1], self.num_classes)
-        self.train_x = np.array(self.train_x).reshape(-1, patch_size[0], patch_size[1])
+        self.train_x = np.array(self.train_x).reshape(-1, patch_size[0], patch_size[1], patch_size[2])
         print("created image patches")
 
         # train decision tree
         shape_x = self.train_x.shape
         shape_y = self.train_y.shape
-        train_x_vec = self.train_x.reshape(shape_x[0], shape_x[1] * shape_x[2])
-        train_y_vec_eoh = self.train_y.reshape(shape_y[0], shape_y[1] * shape_y[2], shape_y[3])
+        train_x_vec = self.train_x.reshape(shape_x[0], shape_x[1] * shape_x[2] * shape_x[3])
+        train_y_vec_ohe = self.train_y.reshape(shape_y[0], shape_y[1] * shape_y[2], shape_y[3])
 
         # revert one hot encoding
         train_y_vec = np.zeros((shape_y[0], shape_y[1] * shape_y[2]))
-        for i in range(len(train_y_vec_eoh)):
-            train_y_vec[i] = list(map(lambda a: np.argmax(a), train_y_vec_eoh[i]))       
+        for i in range(len(train_y_vec_ohe)):
+            train_y_vec[i] = list(map(lambda a: np.argmax(a), train_y_vec_ohe[i]))       
 
         # if file for decision tree is provided load it
         if self.tree_exists is False:
             print("start to fit tree")
+            if self.use_PCA:
+                self.pca = PCA(n_components=3)
+                train_x_vec = self.pca.fit_transform(train_x_vec)
+            
             self.tree.fit(train_x_vec, train_y_vec)
             # save decision tree to disk
             with open(self.dir_main + self.dir_deicison_tree + f'model_{uuid.uuid4().hex}.pkl','wb') as f:
@@ -159,7 +170,7 @@ class TreedGaussianProcessClassifier:
             print("successfully loaded decision tree from disk")
 
         del train_y_vec
-        del train_y_vec_eoh
+        del train_y_vec_ohe
 
         # each image corresponds to a leaf node in the decision tree
         # prediction_node_id defines the node_id to the corresponding image
@@ -207,16 +218,17 @@ class TreedGaussianProcessClassifier:
         """
         #if self.train_x.shape[1:] != X.shape[1:]:
         #    raise ValueError(f"Shape of X must be the same as for the training data")
-
         patches = patchify(X[0], self.patch_size, step=self.stride)
         shape = patches.shape
+
+        
 
         # patches[y][x]
         result = np.zeros((X.shape[1], X.shape[2], self.num_classes))
         for i in range(shape[0]):
             for j in range(shape[1]):
                 
-                predicted = self.__predict_raw(np.array([patches[i][j]]), proba=True)
+                predicted = self.__predict_raw(np.array(patches[i][j]), proba=True)
                 x_pad = (self.stride * i, X.shape[1] - self.patch_size[0] - self.stride * i)
                 y_pad = (self.stride * j, X.shape[2] - self.patch_size[1] - self.stride * j)
 
@@ -234,9 +246,10 @@ class TreedGaussianProcessClassifier:
 
         return: segmented image of size (x,y) if proba True then size is (x,y,num_classes)
         """
-
         # compute kzx for the corresponding leaf node
-        X_vec = X.reshape(X.shape[0], X.shape[1] * X.shape[2])
+        X_vec = X.reshape(X.shape[0], X.shape[1] * X.shape[2] * X.shape[3])
+        if self.use_PCA:
+            X_vec = self.pca.transform(X_vec)
         node_id_prediction = self.tree.apply(X_vec)[0]
         #leaf_id_1 = np.where(self.leaf_id_to_node_id == node_id_prediction)[0][0]
         leaf_id = self.node_id_to_leaf_id[node_id_prediction]
@@ -262,6 +275,7 @@ class TreedGaussianProcessClassifier:
         # Kxx @ c = y => c = Kxx^-1 @ y
         # => f = Kzx @ c
         c = dset_kxx[0]
+
         if self.cuda:
             res = cp.dot(kzx, c)
         else: 
@@ -409,12 +423,14 @@ class TreedGaussianProcessClassifier:
                 end_j = min(j + batch_size, len(Z))
 
                 if self.cuda:
-                    tensor_x = torch.tensor(X[0].reshape(1, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
-                    tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
+                    print(X.shape)
+                    print(Z.shape)
+                    tensor_x = torch.tensor(np.moveaxis(X, 3, 1), dtype=torch.float32).cuda()
+                    tensor_z = torch.tensor(np.moveaxis(Z[start_j:end_j], 3, 1), dtype=torch.float32).cuda()
                     dset[0, start_j:end_j] = self.kernel(tensor_x, tensor_z).cpu()
                 else:
-                    tensor_x = torch.tensor(X[0].reshape(1, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
-                    tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
+                    tensor_x = torch.tensor(X[0].reshape(1, 1, shape_x[1], shape_x[2], shape_x[3]), dtype=torch.float32)
+                    tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2], shape_x[3]), dtype=torch.float32)
                     dset[0, start_j:end_j] = self.kernel(tensor_x, tensor_z)
         else:
             print(f"Calculate kernel matrix with dimensions {len(X),len(Z)} for leaf_id {leaf_id}")
@@ -430,8 +446,12 @@ class TreedGaussianProcessClassifier:
                     #print(f"start_i: {start_i} - end_i {end_i}")
                     #print(f"start_j: {start_j} - end_j {end_j}")
                     if self.cuda:
-                        tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
-                        tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
+                        print(X.shape)
+                        print(Z.shape)
+                        tensor_x = torch.tensor(np.moveaxis(X[start_i:end_i], 3, 1), dtype=torch.float32).cuda()
+                        tensor_z = torch.tensor(np.moveaxis(Z[start_j:end_j], 3, 1), dtype=torch.float32).cuda()
+                        #tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
+                        #tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
                         dset[0, start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z).cpu()
                         dset[0, start_j:end_j, start_i:end_i] = dset[0, start_i:end_i, start_j:end_j].T
                         del tensor_x
@@ -488,9 +508,7 @@ class TreedGaussianProcessClassifier:
             filtered = zipped[np.in1d(zipped[:, 1], filter)]
             for i, image in enumerate(filtered):
                 img = image[0]                
-                matplotlib.image.imsave(f'{dir}/{idx}/groundtruth_{i}.png', img.reshape(img.shape[0], img.shape[1]), cmap='gray')
-
-                
+                matplotlib.image.imsave(f'{dir}/{idx}/groundtruth_{i}.png', img.reshape(img.shape[0], img.shape[1]), cmap='gray')              
         
 
     def get_filenames(self) -> Tuple[str, str, str]:

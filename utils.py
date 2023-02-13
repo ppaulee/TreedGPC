@@ -1,4 +1,7 @@
 import numpy as np
+import h5py
+import matplotlib.image
+import cv2
 
 def revert_one_hot_encoding(array):
     num, width, length, x = array.shape
@@ -63,5 +66,40 @@ def parse_mnist(arr):
                 tmp[num][i][0] = 0
                 tmp[num][i][1] = 1
     return tmp.reshape((arr.shape[0], arr.shape[1], arr.shape[2], 2))
+
+
+def parse_microscopy(hdf5_path, num=5):
+    """
+    parse_microscopy parses the light microscopy image dataset such that it can be processed by the TGP
+
+    param hdf5_path: path to the hdf5 files
+    param num: number of images
+
+    return: images (X,y) X->(num,736,973,3 (RGB)), y->(5, 736, 973, 3 (classes))
+    """
+    raw_array = []
+    label_array = []
+    for i in range(num):
+        f = h5py.File(hdf5_path + f'/Raw_and_Labeled_{i+1}.hdf5', 'r')
+        # create one-hot-encoding (backgorund = [0,0,0])
+        labeled = f.get("label").value
+        labeled_ohe = (np.arange(labeled.max()) == labeled[...,None]-1).astype(int)
+        label_array.append(labeled_ohe[0])
+        
+        # parse raw file
+        raw = f.get("raw").value
+        raw = np.moveaxis(raw, 0, -1)
+        raw = cv2.cvtColor(raw[0], cv2.COLOR_BGR2RGB)
+        raw_array.append(raw)
+    raw_array = np.array(raw_array)
+    label_array = np.array(label_array)
+    return (raw_array, label_array)
+
+    
+
+#/mnt/d/_uni/_thesis/code/render_images/real
+#/mnt/d/_uni/_thesis/code/render_images/labelAll
+#python3.10 preprocessing.py --input "/mnt/d/_uni/_thesis/code/render_images/labelAll" --input_real "/mnt/d/_uni/_thesis/code/render_images/real"
+
 
 
