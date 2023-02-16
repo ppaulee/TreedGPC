@@ -25,10 +25,11 @@ kernel = Sequential(
 treed_gpc = TreedGaussianProcessClassifier(num_classes = 4, kernel=kernel, max_depth=3, cuda = True, use_PCA=True)
 
 
-num_training_samples = 4
+num_training_samples = 50
+num_test_samples = 10
 
-X,y = parse_microscopy('/mnt/d/_uni/_thesis/code/render_images/output_preproc', num_training_samples+1)
-train_x, test_x, train_y, test_y = train_test_split(X, y, test_size=1, random_state=42)
+X,y = parse_microscopy('/mnt/d/_uni/_thesis/code/render_images/output_preproc', num_training_samples+num_test_samples)
+train_x, test_x, train_y, test_y = train_test_split(X, y, test_size=num_test_samples, random_state=42)
 
 
 """ pca = PCA(n_components=3)
@@ -57,16 +58,16 @@ treed_gpc.fit(train_x.reshape(num_training_samples,736,973,3), train_y, batch_si
 
 print("finished fit")
 print(test_x[0].shape)
-for i in range(1):
+for i in range(num_test_samples):
     result = treed_gpc.predict(test_x[i].reshape(1,736,973,3))
     print(f"shape result: {result.shape}")
 
-    result_rgb = class_to_rgb(result).reshape(736,973,3)
+    result_rgb = class_to_rgb(result).reshape(736+32,973+51,3)
     result_rgb = result_rgb.astype(np.uint8)
 
     import matplotlib.image
     matplotlib.image.imsave(f'm_prediction_{i}.png', result_rgb)
-    #matplotlib.image.imsave(f'm_groundtruth_{i}.png', test_x[i].reshape(test_x[i].shape[0], test_x[i].shape[1]), cmap='gray')
+    matplotlib.image.imsave(f'm_groundtruth_{i}.png', test_x[i].reshape(test_x[i].shape[0], test_x[i].shape[1], test_x[i].shape[2]))
 
 end = datetime.datetime.now()
 print(f"total time: {end-start}")

@@ -128,11 +128,26 @@ class TreedGaussianProcessClassifier:
         print(train_x.shape)
         print(self.patch_size)
 
-        for image in train_x:
+        # add padding    
+        # TODO add padding  
+        x_padding = patch_size[0] * (train_x.shape[1] // patch_size[0] + 1) -  train_x.shape[1]
+        y_padding = patch_size[1] * (train_x.shape[2] // patch_size[1] + 1) - train_x.shape[2]
+        self.original_x_shape = train_x.shape
+        self.original_y_shape = train_y.shape
+
+
+        print(x_padding, y_padding)
+
+        #train_x_padded = train_x_padded + train_x
+        train_x_padded = np.pad(train_x, ((0, 0),(0, x_padding),(0, y_padding), (0, 0)), 'constant')
+        train_y_padded = np.pad(train_y, ((0, 0),(0, x_padding),(0, y_padding), (0, 0)), 'constant')
+        #train_y_padded = train_y_padded + train_y
+
+        for image in train_x_padded:
             tmp = patchify(image, patch_size, stride)
             self.train_x.append(np.array(tmp).reshape(-1, patch_size[0], patch_size[1], patch_size[2]))
-        for image in train_y:
-            print(train_y.shape)
+        for image in train_y_padded:
+            #print(train_y.shape)
             tmp = patchify(image, (patch_size[0], patch_size[1], self.num_classes), stride)
             self.train_y.append(np.array(tmp).reshape(-1, patch_size[0], patch_size[1], self.num_classes))
         self.train_y = np.array(self.train_y).reshape(-1, patch_size[0], patch_size[1], self.num_classes)
@@ -218,10 +233,17 @@ class TreedGaussianProcessClassifier:
         """
         #if self.train_x.shape[1:] != X.shape[1:]:
         #    raise ValueError(f"Shape of X must be the same as for the training data")
+        x_padding = self.patch_size[0] * (X.shape[1] // self.patch_size[0] + 1) -  X.shape[1]
+        y_padding = self.patch_size[1] * (X.shape[2] // self.patch_size[1] + 1) - X.shape[2]
+
+        print(x_padding, y_padding)
+
+        #train_x_padded = train_x_padded + train_x
+        X = np.pad(X, ((0, 0),(0, x_padding),(0, y_padding), (0, 0)), 'constant')
+
         patches = patchify(X[0], self.patch_size, step=self.stride)
         shape = patches.shape
-
-        
+     
 
         # patches[y][x]
         result = np.zeros((X.shape[1], X.shape[2], self.num_classes))
@@ -421,16 +443,16 @@ class TreedGaussianProcessClassifier:
                 #print(f"Batch: (0,{j}) for leaf_id: {leaf_id}")
                 start_j = max(0, j-batch_size)
                 end_j = min(j + batch_size, len(Z))
-
+                #print('leaf')
                 if self.cuda:
-                    print(X.shape)
-                    print(Z.shape)
+                    #print(X.shape)
+                    #print(Z.shape)
                     tensor_x = torch.tensor(np.moveaxis(X, 3, 1), dtype=torch.float32).cuda()
                     tensor_z = torch.tensor(np.moveaxis(Z[start_j:end_j], 3, 1), dtype=torch.float32).cuda()
                     dset[0, start_j:end_j] = self.kernel(tensor_x, tensor_z).cpu()
                 else:
-                    tensor_x = torch.tensor(X[0].reshape(1, 1, shape_x[1], shape_x[2], shape_x[3]), dtype=torch.float32)
-                    tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2], shape_x[3]), dtype=torch.float32)
+                    tensor_x = torch.tensor(np.moveaxis(X, 3, 1), dtype=torch.float32)
+                    tensor_z = torch.tensor(np.moveaxis(Z[start_j:end_j], 3, 1), dtype=torch.float32)
                     dset[0, start_j:end_j] = self.kernel(tensor_x, tensor_z)
         else:
             print(f"Calculate kernel matrix with dimensions {len(X),len(Z)} for leaf_id {leaf_id}")
@@ -446,43 +468,44 @@ class TreedGaussianProcessClassifier:
                     #print(f"start_i: {start_i} - end_i {end_i}")
                     #print(f"start_j: {start_j} - end_j {end_j}")
                     if self.cuda:
-                        print(X.shape)
-                        print(Z.shape)
+                        #print(X.shape)
+                        #print(Z.shape)
                         tensor_x = torch.tensor(np.moveaxis(X[start_i:end_i], 3, 1), dtype=torch.float32).cuda()
                         tensor_z = torch.tensor(np.moveaxis(Z[start_j:end_j], 3, 1), dtype=torch.float32).cuda()
-                        #tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
-                        #tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32).cuda()
                         dset[0, start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z).cpu()
                         dset[0, start_j:end_j, start_i:end_i] = dset[0, start_i:end_i, start_j:end_j].T
                         del tensor_x
                         del tensor_z
                         torch.cuda.empty_cache()
                     else:
-                        tensor_x = torch.tensor(X[start_i:end_i].reshape(end_i - start_i, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
-                        tensor_z = torch.tensor(Z[start_j:end_j].reshape(end_j - start_j, 1, shape_x[1], shape_x[2]), dtype=torch.float32)
+                        tensor_x = torch.tensor(np.moveaxis(X[start_i:end_i], 3, 1), dtype=torch.float32)
+                        tensor_z = torch.tensor(np.moveaxis(Z[start_j:end_j], 3, 1), dtype=torch.float32)
                         dset[0, start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z)
                         dset[0, start_j:end_j, start_i:end_i] = dset[0, start_i:end_i, start_j:end_j].T
 
         torch.cuda.empty_cache()
         if calc_c:
             print('calculate c')
+            print(dset[0].shape)
             # compute kzx for the corresponding leaf node
             X_bucket = self.buckets[leaf_id]                                                         
             tmp = self.train_y.reshape(self.train_y.shape[0], self.train_y.shape[1] * self.train_y.shape[2], self.num_classes)
             tmp = tmp[X_bucket]
-            if self.cuda:
+            #if self.cuda:
+            if False:
                 cp_A = cp.asarray(dset[0])
                 cp_b = cp.asarray(tmp.reshape(tmp.shape[0], tmp.shape[1] * tmp.shape[2]))         
                 dset_c[0] = cp.linalg.lstsq(cp_A, cp_b, rcond=1e-6)[0].get().reshape(dset[0].shape[0], 
                     self.train_y.shape[1] * self.train_y.shape[2] * self.num_classes)
-                #dset_c = cp.linalg.lstsq(cp_A, cp_b, rcond=1e-6)[0].get().reshape(dset[0].shape[0], 
-                #    self.train_y.shape[1] * self.train_y.shape[2] * self.num_classes)
                 del cp_A
                 del cp_b
             else:
                 #dset_c[i] = scipy.linalg.lstsq(dset[0], self.__divide_in_classes(tmp, i), cond=1e-6, check_finite = False)[0]
-                dset_c[0] = scipy.linalg.lstsq(dset[0], tmp.reshape(tmp.shape[0], tmp.shape[1] * tmp.shape[2]), rcond=1e-6)[0].reshape(dset[0].shape[0], 
+                cp_A = dset[0]
+                cp_b = tmp.reshape(tmp.shape[0], tmp.shape[1] * tmp.shape[2])
+                dset_c[0] = scipy.linalg.lstsq(cp_A, cp_b, cond=1e-6, overwrite_a = True, overwrite_b = True, check_finite = False)[0].reshape(dset[0].shape[0], 
                     self.train_y.shape[1] * self.train_y.shape[2] * self.num_classes)
+                
             print('finished calculating c')
 
         # clear all GPU memory

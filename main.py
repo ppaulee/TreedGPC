@@ -47,7 +47,7 @@ treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_d
 #treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=4, filename_tree="model_10000.pkl",
 #   filename_kxx="kxx_10000")
 
-num_training_samples = 200
+num_training_samples = 10
 
 #"""
 train_x, train_y, test_x, test_y = create_semantic_segmentation_dataset(num_train_samples=num_training_samples,
