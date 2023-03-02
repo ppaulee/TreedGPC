@@ -1,7 +1,6 @@
 from treed_gp import TreedGaussianProcessClassifier
 from utils import (class_to_rgb, add_none_class)
-from simple_deep_learning.mnist_extended.semantic_segmentation import (create_semantic_segmentation_dataset, display_segmented_image,
-                                                                       display_grayscale_array, plot_class_masks)
+from extended_mnist.semantic_segmentation import create_semantic_segmentation_dataset
 from cnn_gp import Sequential, Conv2d, ReLU
 import numpy as np
 import datetime
@@ -78,7 +77,7 @@ treed_gpc.fit(train_x.reshape(num_training_samples,60,60,1), train_y, batch_size
 
 print("finished fit")
 print(test_x[0].shape)
-for i in range(5):
+for i in range(0):
     result = treed_gpc.predict(test_x[i].reshape(1,60,60,1))
     print(f"shape result: {result.shape}")
 
@@ -91,7 +90,7 @@ for i in range(5):
 
 end = datetime.datetime.now()
 print(f"total time: {end-start}")
-exit()
+
 # 0:00:58.919398 on 100 images with cuda
 # 0:00:26.375704 on 100 images without cuda
 #

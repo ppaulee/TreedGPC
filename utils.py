@@ -17,7 +17,7 @@ def revert_one_hot_encoding(array):
 mapping_class_to_rgb = [
     (255,255,255), #white -> background
     (0,0,255), #blue -> 0
-    (255,255,0), #yellow -> 1
+    (255,165,0), #orange -> 1
     (0,153,51), #green -> 2
     (204,0,204), #purple -> 3
     (255, 0, 0), #red -> 4
@@ -27,7 +27,7 @@ mapping_class_to_rgb = [
 def class_to_rgb(image):
     reshaped = image.reshape(image.shape[0] * image.shape[1])   
     result = np.zeros((image.shape[0] * image.shape[1],3), dtype=object)
-    for i in range(0, len(reshaped)):
+    for i in range(0, len(reshaped)):       
         result[i] = mapping_class_to_rgb[int(reshaped[i])]
     return result
     
@@ -94,6 +94,7 @@ def parse_microscopy(hdf5_path, num=5):
     raw_array = np.array(raw_array)
     label_array = np.array(label_array)
     return (raw_array, label_array)
+
 
     
 
