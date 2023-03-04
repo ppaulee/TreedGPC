@@ -32,6 +32,7 @@ class TreedGaussianProcessClassifier:
     #dir_kernel_matrix = '/experiments/micro/'
     dir_deicison_tree = "/decision_tree/"
     dir_main = "./_tgpc/"
+    train_x_original_shape = (0,0)
 
     # defines the threshold to treat an images as only background
     non_zero_ratio = 0.9
@@ -175,19 +176,22 @@ class TreedGaussianProcessClassifier:
         for image in train_x_padded:
             tmp = patchify(image, patch_size, stride)
             self.train_x.append(np.array(tmp).reshape(-1, patch_size[0], patch_size[1], patch_size[2]))
+            del tmp
         for image in train_y_padded:
-            #print(train_y.shape)
             tmp = patchify(image, (patch_size[0], patch_size[1], self.num_classes), stride)
             self.train_y.append(np.array(tmp).reshape(-1, patch_size[0], patch_size[1], self.num_classes))
+            del tmp
         self.train_y = np.array(self.train_y).reshape(-1, patch_size[0], patch_size[1], self.num_classes)
         self.train_x = np.array(self.train_x).reshape(-1, patch_size[0], patch_size[1], patch_size[2])
 
         # subsamples images, i.e., remove mainly background images
-        subsampled_indices = self.__subsample_images(self.train_x)  
+        subsampled_indices = self.__subsample_images(self.train_x)
         self.train_y = self.train_y[subsampled_indices]
         self.train_x = self.train_x[subsampled_indices]
         if self.verbose > 1:
             print("created image patches")
+            print(f'used {len(self.train_x)} images')
+
 
         # train decision tree
         shape_x = self.train_x.shape
@@ -281,7 +285,6 @@ class TreedGaussianProcessClassifier:
         if X.shape[2] % self.patch_size[1] == 0:
             y_padding = 0
 
-        #train_x_padded = train_x_padded + train_x
         X = np.pad(X, ((0, 0),(0, x_padding),(0, y_padding), (0, 0)), 'constant')
 
         patches = patchify(X[0], self.patch_size, step=self.stride)
@@ -299,8 +302,8 @@ class TreedGaussianProcessClassifier:
 
                 patch = np.pad(predicted, (x_pad, y_pad, (0,0)), 'constant', constant_values=0)
                 result = np.add(result, patch)
-
-        return np.argmax(result, axis=2)
+        res = np.argmax(result, axis=2)
+        return res[:self.original_x_shape[1],:self.original_x_shape[2]]
 
     def __predict_raw(self, X : np.ndarray, proba = False) -> np.ndarray:
         """
@@ -316,12 +319,11 @@ class TreedGaussianProcessClassifier:
         if self.use_PCA:
             X_vec = self.pca.transform(X_vec)
         node_id_prediction = self.tree.apply(X_vec)[0]
-        #leaf_id_1 = np.where(self.leaf_id_to_node_id == node_id_prediction)[0][0]
+
         leaf_id = self.node_id_to_leaf_id[node_id_prediction]
-        #print(leaf_id_1 == leaf_id)
+
         X_bucket = self.buckets[leaf_id]
 
-        #exit()
         if self.kzx_exists is False:                      
             self.__compute_kernel_matrix(X, Z=self.train_x[X_bucket], leaf_id="pred", batch_size = 100)                                                                 
 
@@ -341,7 +343,6 @@ class TreedGaussianProcessClassifier:
         # => f = Kzx @ c
         c = dset_kxx[0]
 
-        #if self.cuda:
         if self.cuda:
             try:
                 res = cp.dot(kzx, c)
@@ -375,7 +376,7 @@ class TreedGaussianProcessClassifier:
                 print(f"Predict {idx+1}/{len(test_x)}")
             v = val.reshape(1, test_x.shape[1], test_x.shape[2], test_x.shape[3])
             prediction[idx] = self.predict(v)
-        prediction = prediction.reshape(len(test_x) * test_x.shape[1] * test_x.shape[2] * test_x.shape[3])
+        prediction = prediction.reshape(len(test_x) * test_x.shape[1] * test_x.shape[2])
         groundtruth = revert_one_hot_encoding(groundtruth)
         groundtruth = groundtruth.reshape(len(groundtruth) * groundtruth.shape[1] * groundtruth.shape[2])
 
@@ -385,6 +386,7 @@ class TreedGaussianProcessClassifier:
             target_names += [f"Class {i}"]
 
         print(jaccard_score(groundtruth, prediction, average = None))
+        print(np.mean(jaccard_score(groundtruth, prediction, average = None)))
         return classification_report(groundtruth, prediction, output_dict = True)
 
     def __relu(self, arr : np.ndarray) -> np.ndarray:
@@ -485,18 +487,13 @@ class TreedGaussianProcessClassifier:
             # calculates c for prediction for each class
             f = h5py.File(self.dir_main + self.dir_kernel_matrix + self.filename_kxx,'r+')
             dset_c = f.create_dataset(f"kxx_c_{leaf_id}", (1, len(X), X.shape[1] * X.shape[2] * self.num_classes), dtype='float32')
-            #dset_c = f.create_dataset(f"kxx_c_{leaf_id}", (len(X), X.shape[1] * X.shape[2] * self.num_classes), dtype='float32')
 
         shape_x = X.shape
         if len(X) == 1:
             for j in range(0, len(Z)+1, batch_size):
-                #print(f"Batch: (0,{j}) for leaf_id: {leaf_id}")
                 start_j = max(0, j-batch_size)
                 end_j = min(j + batch_size, len(Z))
-                #print('leaf')
                 if self.cuda:
-                    #print(X.shape)
-                    #print(Z.shape)
                     tensor_x = torch.tensor(np.moveaxis(X, 3, 1), dtype=torch.float32).cuda()
                     tensor_z = torch.tensor(np.moveaxis(Z[start_j:end_j], 3, 1), dtype=torch.float32).cuda()
                     dset[0, start_j:end_j] = self.kernel(tensor_x, tensor_z).cpu()
@@ -517,8 +514,6 @@ class TreedGaussianProcessClassifier:
                     end_i = min(i + batch_size, len(X))
                     start_j = j
                     end_j = min(j + batch_size, len(Z))
-                    #print(f"start_i: {start_i} - end_i {end_i}")
-                    #print(f"start_j: {start_j} - end_j {end_j}")
                     if self.cuda:
                         try:
                             tensor_x = torch.tensor(np.moveaxis(X[start_i:end_i], 3, 1), dtype=torch.float32).cuda()
@@ -536,8 +531,14 @@ class TreedGaussianProcessClassifier:
                         tensor_z = torch.tensor(np.moveaxis(Z[start_j:end_j], 3, 1), dtype=torch.float32)
                         dset[0, start_i:end_i, start_j:end_j] = self.kernel(tensor_x, tensor_z)
                         dset[0, start_j:end_j, start_i:end_i] = dset[0, start_i:end_i, start_j:end_j].T
+        
+        if self.cuda:
+            try:
+                torch.cuda.empty_cache()
+            except:
+                print('nu cuda available')
 
-        #torch.cuda.empty_cache()
+
         if calc_c:
             if self.verbose > 0:
                 print('calculate c')
@@ -546,7 +547,6 @@ class TreedGaussianProcessClassifier:
             X_bucket = self.buckets[leaf_id]                                                         
             tmp = self.train_y.reshape(self.train_y.shape[0], self.train_y.shape[1] * self.train_y.shape[2], self.num_classes)
             tmp = tmp[X_bucket]
-            #if self.cuda:
             if self.cuda:
                 try:
                     cp_A = cp.asarray(dset[0])
@@ -560,7 +560,6 @@ class TreedGaussianProcessClassifier:
                         print("cuda not available")
 
             else:
-                #dset_c[i] = scipy.linalg.lstsq(dset[0], self.__divide_in_classes(tmp, i), cond=1e-6, check_finite = False)[0]
                 cp_A = dset[0]
                 cp_b = tmp.reshape(tmp.shape[0], tmp.shape[1] * tmp.shape[2])
                 dset_c[0] = scipy.linalg.lstsq(cp_A, cp_b, cond=1e-6, overwrite_a = True, overwrite_b = True, check_finite = False)[0].reshape(dset[0].shape[0], 
@@ -569,10 +568,14 @@ class TreedGaussianProcessClassifier:
                 print('finished calculating c')
 
         # clear all GPU memory
-        #mempool = cp.get_default_memory_pool()
-        #pinned_mempool = cp.get_default_pinned_memory_pool()
-        #mempool.free_all_blocks()
-        #pinned_mempool.free_all_blocks()
+        try:
+            mempool = cp.get_default_memory_pool()
+            pinned_mempool = cp.get_default_pinned_memory_pool()
+            mempool.free_all_blocks()
+            pinned_mempool.free_all_blocks()
+        except:
+            if self.verbose > 0:
+                print("cuda not available")
 
     def display_buckets(self, dir = "./buckets/", prob = 0.1):
         """
@@ -602,13 +605,19 @@ class TreedGaussianProcessClassifier:
         :return indices of subsampled images
         """
         if X.shape[3] > 1:
+            non_zero = np.array(list(map(self.__count_non_background_micro, X)))
             return np.array(range(len(X)))
-        non_zero = np.array(list(map(cv2.countNonZero, X)))
+        else:
+            non_zero = np.array(list(map(cv2.countNonZero, X)))
+        print(non_zero)
         non_zero = non_zero / (X[0].shape[0] * X[0].shape[1])
-        images = list(zip(range(len(X)), non_zero))
+        images = list(zip(range(0,len(X),1), non_zero))
+
+        # indicesof images contianing mostly foreground
         non_background = list(filter(lambda x: x[1] < self.non_zero_ratio, images))
         non_background = np.array(list(map(lambda x: x[0], non_background)))
 
+        # indices of images containing mostly background
         background = list(filter(lambda x: x[1] >= self.non_zero_ratio, images))
         background = np.array(list(map(lambda x: x[0], background)))
         if self.verbose > 0:
@@ -617,8 +626,25 @@ class TreedGaussianProcessClassifier:
         if (len(background) == 0):
             return non_background
 
+        # add one background image
         non_background = np.concatenate((non_background, [background[0]]), axis=0)    
-        return non_background               
+
+        return non_background     
+
+    def __count_non_background_micro(self, X):
+        """
+        __count_non_background_micro counts the number of pixels containing only background
+
+        :param X: images (x,y,c)
+
+        :return int: number of pixels that are non background
+        """
+        r = 247
+        g = 243
+        b = 233
+        background_rgb = [247,243,233]
+        res = np.array(list(map(lambda x: x != background_rgb, X.reshape(X.shape[0] * X.shape[1], X.shape[2]))))
+        return np.sum(res)          
 
     def get_filenames(self) -> Tuple[str, str, str]:
         """

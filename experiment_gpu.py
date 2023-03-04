@@ -22,22 +22,24 @@ import datetime
 
 np.random.seed(seed=9)
 
-def f(combination, train_x, train_y, test_x, test_y, kernel, use_pca):
+def f(gpu, combination, train_x, train_y, test_x, test_y, kernel):
     len_train = combination[0]
     len_test = combination[1]
     train_x = train_x[:len_train,:,:,:]
     train_y = train_y[:len_train,:,:,:]
     test_x = test_x[:len_test,:,:,:]
-    test_y = test_y[:len_test,:,:,:]
 
-    treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = True, verbose=0, use_PCA=use_pca)
+    start = datetime.datetime.now()
+    treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = gpu, verbose=0)
     treed_gpc.fit(train_x.reshape(len_train,60,60,1), train_y, batch_size = 250, patch_size=(20,20,1), stride = 5)
-    print('############################################################################')
-    print(f'use PCA is {use_pca} for combination: {combination}')
-    performance = treed_gpc.eval_performance(test_x.reshape(len_test,60,60,1), test_y)   
-    print(performance)
-    print(performance['macro avg']['f1-score'])
+    end = datetime.datetime.now()
+    print(f"total training time for combination {combination} and GPU is {gpu}: {end-start}")
 
+    start = datetime.datetime.now()
+    for i in range(len(test_x)):
+        result = treed_gpc.predict(test_x[i].reshape(1,60,60,1))
+    end = datetime.datetime.now()
+    print(f"total prediction time for combination {combination} and GPU is {gpu}: {end-start}")
 
 
  
@@ -69,7 +71,6 @@ print("Finished adding the background class")
 print(train_y.shape)
 
 np.ceil(train_y.astype(float), out=train_y)
-print("preparing to fit data")
 
 # batch size 200 for 8GB of GPU RAM
 s = [(8,2),(16,4),(24,6),(32,8),(40,10),(48,12),(56,14), (64,16), (72,18), (80,20)]
@@ -85,7 +86,7 @@ for combination in s:
         ReLU(),  # Total 7 layers before dense
         # Dense Layer
         Conv2d(kernel_size=20, padding=0, var_weight=var_weight, var_bias=var_bias))
-    f(combination, train_x, train_y, test_x, test_y, kernel_, True)
-    f(combination, train_x, train_y, test_x, test_y, kernel_, False)
+    f(False, combination, train_x, train_y, test_x, test_y, kernel_)
+    f(True, combination, train_x, train_y, test_x, test_y, kernel_)
     
 
