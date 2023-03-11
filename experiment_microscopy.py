@@ -22,22 +22,15 @@ kernel = Sequential(
     # Dense Layer
     Conv2d(kernel_size=256, padding=0, var_weight=var_weight, var_bias=var_bias))
 
-#treed_gpc = TreedGaussianProcessClassifier(num_classes = 4, kernel=kernel, max_depth=3, cuda = True, use_PCA=True, verbose = 2)
-treed_gpc = TreedGaussianProcessClassifier(num_classes = 4, kernel=kernel, max_depth=3, cuda = True, use_PCA=True, verbose = 2, filename_kxx='kxx_micro', filename_tree='model_micro.pkl')
+treed_gpc = TreedGaussianProcessClassifier(num_classes = 4, kernel=kernel, max_depth=3, cuda = True, use_PCA=True, verbose = 2)
+#treed_gpc = TreedGaussianProcessClassifier(num_classes = 4, kernel=kernel, max_depth=3, cuda = True, use_PCA=True, verbose = 2, filename_kxx='kxx_micro_20', filename_tree='model_micro_20.pkl')
 treed_gpc.non_zero_ratio = 2
 
-num_training_samples = 10
+num_training_samples = 20
 num_test_samples = 10
-# '/u/halle/ungerman/home_at/bachelor_thesis/code/render_images/output_preproc/'
+
 X,y = parse_microscopy('/mnt/d/_uni/_thesis/code/render_images/output_preproc', num_training_samples+num_test_samples)
 train_x, test_x, train_y, test_y = train_test_split(X, y, test_size=num_test_samples, random_state=42)
-
-
-""" pca = PCA(n_components=3)
-pca.fit(train_x.reshape(len(train_x), 736*973*3))
-print(pca.explained_variance_ratio_)
-print(np.sum(pca.explained_variance_ratio_))
-exit() """
 
 print(f"train_x shape: {train_x.shape}")
 print(f"train_y shape: {train_y.shape}")

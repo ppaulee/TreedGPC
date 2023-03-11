@@ -133,21 +133,3 @@ for idx, num_layer_ in enumerate(param_grid['num_layer']):
     kernel_size_l = kernel_size_l, kernel_size = kernel_size, num_layer = num_layer_)
 print(dset)
 print(np.argmin(dset))
-
-                          
-
-
-'''
-Traceback (most recent call last):
-  File "/u/halle/ungerman/home_at/bachelor_thesis/code/TreedGPC/cross_validation.py", line 81, in <module>
-    dset[id1, id2, id3, id4, id5, id6, id7, id8] = cross_validate(train_x, train_y, max_depth = max_depth,
-  File "/u/halle/ungerman/home_at/bachelor_thesis/code/TreedGPC/cross_validation.py", line 42, in cross_validate
-    treed_gpc.fit(train_x.reshape(len(train_x),60,60,1), tmp, batch_size = 200, patch_size=(20,20,1), stride = 10)
-  File "/u/halle/ungerman/home_at/bachelor_thesis/code/TreedGPC/treed_gp.py", line 259, in fit
-    self.__compute_kernel_matrix(train_x_bucket, batch_size = batch_size, leaf_id=idx, calc_c = True)
-  File "/u/halle/ungerman/home_at/bachelor_thesis/code/TreedGPC/treed_gp.py", line 564, in __compute_kernel_matrix
-    dset_c[0] = scipy.linalg.lstsq(cp_A, cp_b, cond=1e-6, overwrite_a = True, overwrite_b = True, check_finite = False)[0].reshape(dset[0].shape[0],
-  File "/usr/lib/python3/dist-packages/scipy/linalg/_basic.py", line 1204, in lstsq
-    x, s, rank, info = lapack_func(a1, b1, lwork,
-ValueError: On entry to DLASCL parameter number 4 had an illegal value
-'''

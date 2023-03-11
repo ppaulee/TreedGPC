@@ -53,6 +53,7 @@ class TreedGaussianProcessClassifier:
         :param filename_kzx: name of the file of the kzx kernel matrix. If provided the kzx kernel matrix will not be calculated
         :param cuda: indicates whether to use the gpu for kernel calculations
         :param verbose: 2->everything, 1->restricted, 0->nothing
+        :param use_PCA: indicates to use PCA to train the decision tree (important! can not load decision tree from file if True)
 
         optional kernel parameter if kernel is not given
         :param var_bias: var_bias
@@ -276,8 +277,6 @@ class TreedGaussianProcessClassifier:
 
         return: segmented image
         """
-        #if self.train_x.shape[1:] != X.shape[1:]:
-        #    raise ValueError(f"Shape of X must be the same as for the training data")
         x_padding = self.patch_size[0] * (X.shape[1] // self.patch_size[0] + 1) -  X.shape[1]
         y_padding = self.patch_size[1] * (X.shape[2] // self.patch_size[1] + 1) - X.shape[2]
         if X.shape[1] % self.patch_size[0] == 0:
@@ -336,7 +335,6 @@ class TreedGaussianProcessClassifier:
         dset_kzx = f[f'kzx_pred_{self.prediction_count-1}']
         kzx = dset_kzx[0:dset_kzx.shape[0],0:dset_kzx.shape[1]]
 
-        #print(f"Predict {self.prediction_count-1}")
         # shape y: (width, height, num_classes) one-hot-encoded
         # f = Kzx @ Kxx^-1 @ y 
         # Kxx @ c = y => c = Kxx^-1 @ y
@@ -536,7 +534,7 @@ class TreedGaussianProcessClassifier:
             try:
                 torch.cuda.empty_cache()
             except:
-                print('nu cuda available')
+                print('no cuda available')
 
 
         if calc_c:
@@ -568,14 +566,15 @@ class TreedGaussianProcessClassifier:
                 print('finished calculating c')
 
         # clear all GPU memory
-        try:
-            mempool = cp.get_default_memory_pool()
-            pinned_mempool = cp.get_default_pinned_memory_pool()
-            mempool.free_all_blocks()
-            pinned_mempool.free_all_blocks()
-        except:
-            if self.verbose > 0:
-                print("cuda not available")
+        if self.cuda:
+            try:
+                mempool = cp.get_default_memory_pool()
+                pinned_mempool = cp.get_default_pinned_memory_pool()
+                mempool.free_all_blocks()
+                pinned_mempool.free_all_blocks()
+            except:
+                if self.verbose > 0:
+                    print("cuda not available")
 
     def display_buckets(self, dir = "./buckets/", prob = 0.1):
         """
@@ -604,16 +603,16 @@ class TreedGaussianProcessClassifier:
 
         :return indices of subsampled images
         """
+
         if X.shape[3] > 1:
             non_zero = np.array(list(map(self.__count_non_background_micro, X)))
-            return np.array(range(len(X)))
         else:
             non_zero = np.array(list(map(cv2.countNonZero, X)))
-        print(non_zero)
-        non_zero = non_zero / (X[0].shape[0] * X[0].shape[1])
+
+        non_zero = non_zero / (X.shape[1] * X.shape[2])
         images = list(zip(range(0,len(X),1), non_zero))
 
-        # indicesof images contianing mostly foreground
+        # indices of images contianing mostly foreground
         non_background = list(filter(lambda x: x[1] < self.non_zero_ratio, images))
         non_background = np.array(list(map(lambda x: x[0], non_background)))
 
@@ -644,7 +643,7 @@ class TreedGaussianProcessClassifier:
         b = 233
         background_rgb = [247,243,233]
         res = np.array(list(map(lambda x: x != background_rgb, X.reshape(X.shape[0] * X.shape[1], X.shape[2]))))
-        return np.sum(res)          
+        return np.sum(res) / 3        
 
     def get_filenames(self) -> Tuple[str, str, str]:
         """

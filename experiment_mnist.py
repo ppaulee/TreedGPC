@@ -5,24 +5,7 @@ from cnn_gp import Sequential, Conv2d, ReLU
 import numpy as np
 import datetime
 
-# run renders
-# python3.10 /mnt/d/_uni/_thesis/code/blender_images/blender/blenderconfig/main.py "/home/paul/blender-3.0.0-linux-x64/blender" "/mnt/d/_uni/_thesis/code/blender_images/blender/cell03_original.blend"
-# python D:\\_uni\\_thesis\\code\\blender_images\\blender\\blenderconfig\\main.py "D:\\Program Files\\Blender Foundation\\Blender 3.4\\3.4\\python\\bin\\python.exe" "D:\\_uni\\_thesis\\code\\blender_images\\blender\\cell03_original.blend"
-
-
-#python D:/_uni/_thesis/code/blender_images/blender/blenderconfig/main.py "D:/Program Files/Blender Foundation/Blender 3.4/3.4/python/bin/python.exe" "D:/_uni/_thesis/code/blender_images/blender/cell03_original.blend"
-
-'''
-"D:\\Program Files\\Blender Foundation\\Blender 3.4\\3.4\\python\\bin\\python.exe" 
-"D:\\_uni\\_thesis\\code\\blender_images\\blender\\cell03_new.blend"  
---background 
---python "D:\\_uni\\_thesis\\code\\blender_images\\blender\\blenderconfig\\blender_render.py" 
--- "D:\\_uni\\_thesis\\code\\blender_images\\blender\\renders_config\\render_config.00446.json"
-'''
-
 np.random.seed(seed=9)
-
-
 
 var_bias = 7.86
 var_weight = 2.79

@@ -5,21 +5,6 @@ from cnn_gp import Sequential, Conv2d, ReLU
 import numpy as np
 import datetime
 
-# run renders
-# python3.10 /mnt/d/_uni/_thesis/code/blender_images/blender/blenderconfig/main.py "/home/paul/blender-3.0.0-linux-x64/blender" "/mnt/d/_uni/_thesis/code/blender_images/blender/cell03_original.blend"
-# python D:\\_uni\\_thesis\\code\\blender_images\\blender\\blenderconfig\\main.py "D:\\Program Files\\Blender Foundation\\Blender 3.4\\3.4\\python\\bin\\python.exe" "D:\\_uni\\_thesis\\code\\blender_images\\blender\\cell03_original.blend"
-
-
-#python D:/_uni/_thesis/code/blender_images/blender/blenderconfig/main.py "D:/Program Files/Blender Foundation/Blender 3.4/3.4/python/bin/python.exe" "D:/_uni/_thesis/code/blender_images/blender/cell03_original.blend"
-
-'''
-"D:\\Program Files\\Blender Foundation\\Blender 3.4\\3.4\\python\\bin\\python.exe" 
-"D:\\_uni\\_thesis\\code\\blender_images\\blender\\cell03_new.blend"  
---background 
---python "D:\\_uni\\_thesis\\code\\blender_images\\blender\\blenderconfig\\blender_render.py" 
--- "D:\\_uni\\_thesis\\code\\blender_images\\blender\\renders_config\\render_config.00446.json"
-'''
-
 np.random.seed(seed=9)
 
 def f(combination, train_x, train_y, test_x, test_y, kernel, use_pca):
@@ -38,17 +23,9 @@ def f(combination, train_x, train_y, test_x, test_y, kernel, use_pca):
     print(performance)
     print(performance['macro avg']['f1-score'])
 
-
-
- 
-
-
-#treed_gpc = TreedGaussianProcessClassifier(num_classes = 6, kernel=kernel, max_depth=3, cuda = True, filename_tree='model_b27957ab1237454da64143d4a9738373.pkl', filename_kxx='kxx_7236fc3ccf5e4cd8a1a7e97923588f73', verbose=1)
-
 num_training_samples = 100
 num_test_samples = 50
 
-#"""
 train_x, train_y, test_x, test_y = create_semantic_segmentation_dataset(num_train_samples=num_training_samples,
                                                                         num_test_samples=num_test_samples,
                                                                         image_shape=(60, 60),
@@ -71,7 +48,6 @@ print(train_y.shape)
 np.ceil(train_y.astype(float), out=train_y)
 print("preparing to fit data")
 
-# batch size 200 for 8GB of GPU RAM
 s = [(8,2),(16,4),(24,6),(32,8),(40,10),(48,12),(56,14), (64,16), (72,18), (80,20)]
 for combination in s:
     var_bias = 7.86
